@@ -1,0 +1,14 @@
+node_modules/
+dist/
+storybook-static/
+.venv/
+__pycache__/
+.pytest_cache/
+.coverage*
+coverage/
+htmlcov/
+*.db
+*.db-shm
+*.db-wal
+.env
+.DS_Store

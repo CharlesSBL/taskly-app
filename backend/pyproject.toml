@@ -1,0 +1,30 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"
+
+[tool.coverage.run]
+source = ["app"]
+branch = true
+omit = [
+    "*/app/__init__.py",
+    "*/app/**/__init__.py",
+    "*/app/main.py",
+    "*/app/**/schemas.py",
+    "*/app/**/models.py",
+    "*/app/**/types.py",
+    "*/app/**/constants.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+
+[tool.coverage.html]
+directory = "coverage/html"
+
+[tool.coverage.xml]
+output = "coverage/coverage.xml"
+
+[tool.coverage.json]
+output = "coverage/coverage.json"

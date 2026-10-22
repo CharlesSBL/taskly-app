@@ -1,0 +1,93 @@
+/* Layout only. Component appearance is owned by src/design-system. */
+.page-layout {
+  max-width: var(--layout-content);
+  margin-inline: auto;
+  padding: var(--space-xl) var(--space-lg);
+  display: grid;
+  gap: var(--space-lg);
+}
+.stack {
+  display: grid;
+  gap: var(--space-md);
+  min-width: 0;
+}
+.row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+}
+.spread {
+  justify-content: space-between;
+}
+.stack.compact,
+.row.compact {
+  gap: var(--space-sm);
+}
+.actions {
+  justify-content: flex-end;
+}
+.filters-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) repeat(2, minmax(0, 1fr));
+  gap: var(--space-md);
+}
+.todo-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.todo-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+.todo-content {
+  flex: 1;
+  min-width: 0;
+}
+.todo-actions {
+  flex-shrink: 0;
+}
+.form-fields {
+  padding: 0;
+  margin: 0;
+  border: 0;
+  min-width: 0;
+}
+.form-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-md);
+}
+.field {
+  min-width: 0;
+}
+.notice-position {
+  position: fixed;
+  bottom: var(--space-lg);
+  left: var(--space-lg);
+  right: var(--space-lg);
+  width: fit-content;
+  max-width: calc(100% - var(--space-xxl));
+  margin-inline: auto;
+}
+@media (max-width: 640px) {
+  .page-layout {
+    padding: var(--space-lg) var(--space-md);
+  }
+  .filters-layout,
+  .form-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .todo-row {
+    flex-wrap: wrap;
+  }
+  .todo-content {
+    flex-basis: 100%;
+  }
+  .todo-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}
