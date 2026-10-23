@@ -203,6 +203,13 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Expose baseline coverage to the agent
+        if: steps.prefilter.outputs.stacks != ''
+        run: |
+          mkdir -p artifacts/fe_coverage
+          cp baseline/backend/be_coverage.json artifacts/be_coverage.json
+          cp baseline/frontend/fe_coverage/coverage-summary.json artifacts/fe_coverage/coverage-summary.json
+
       - name: Run the agent (API key only in this step)
         if: steps.prefilter.outputs.stacks != ''
         working-directory: trusted/ai_test_agent
@@ -211,6 +218,7 @@ jobs:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           TASKLY_AGENT_PROVIDER: ${{ vars.AGENT_PROVIDER || 'anthropic' }}
           TASKLY_AGENT_MODEL: ${{ vars.AGENT_MODEL }}
+          TASKLY_MAX_TURNS: "25"
           STACKS: ${{ steps.prefilter.outputs.stacks }}
           LOCKFILE_CHANGED: ${{ steps.lockfiles.outputs.changed }}
         run: |
@@ -295,7 +303,6 @@ jobs:
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: untrusted-agent-output-${{ github.event.pull_request.head.sha }}
-          path: artifacts
 
       - name: Run the verification gate
         id: verify
@@ -365,7 +372,6 @@ jobs:
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: verified-agent-output-${{ github.event.pull_request.head.sha }}
-          path: verified
 
       - name: Build a fallback report
         if: steps.download.outcome != 'success'
@@ -373,6 +379,7 @@ jobs:
           STACKS: ${{ needs.agent-run.outputs.stacks }}
           AGENT_RESULT: ${{ needs.agent-run.result }}
         run: |
+          mkdir -p verified
           {
             echo "<!-- ai-unit-test-agent-report -->"
             echo "## 🤖 AI unit-test agent"

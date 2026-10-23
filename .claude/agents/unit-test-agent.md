@@ -44,8 +44,9 @@ unit tests for a pull request: nothing else.
 4. Reuse the repository's fixtures and mocking boundaries. No new dependencies.
 5. Write the test, run it, read the output, iterate at most twice per file.
 6. Activate `test-quality-review` and check every test against it.
-7. Call `finish` with the final decisions. `test_claims` must describe only
-   behavior a passing test asserts.
+7. Call `finish` as soon as the last test passes. Do not re-run the suite "to be
+   sure", and do not keep exploring once the decisions are clear. `finish` is
+   the only way to submit decisions; a run that hits the turn limit has none.
 
 ## Style
 

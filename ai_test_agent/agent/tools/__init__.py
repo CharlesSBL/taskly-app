@@ -133,7 +133,11 @@ def _run(ctx: ToolContext, stack: Stack, arguments: dict[str, Any], *, coverage:
         if is_tooling_path(item):
             raise PathRejected("tooling paths are out of scope")
         ctx.policy.check_test_file(item)
-    result: CommandResult = ctx.sandbox.run(stack, paths, coverage=coverage)
+    # The sandbox runs with cwd=<stack>, so strip the stack prefix.
+    stack_relative = [
+        item[len(stack) + 1 :] if item.startswith(f"{stack}/") else item for item in paths
+    ]
+    result: CommandResult = ctx.sandbox.run(stack, stack_relative, coverage=coverage)
     return wrap_untrusted(f"exit code: {result.returncode}\n{result.output}", f"{stack} test run")
 
 

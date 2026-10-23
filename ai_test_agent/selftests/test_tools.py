@@ -234,12 +234,13 @@ def test_run_tools_go_through_the_sandbox(context: ToolContext) -> None:
         "run_pytest",
         {"paths": ["backend/tests/test_existing.py"]},
     )
-    assert sandbox.calls == [("backend", ["backend/tests/test_existing.py"], False)]
+    assert sandbox.calls == [("backend", ["tests/test_existing.py"], False)]
     assert "exit code: 0" in result
     assert "1 passed" in result
 
     execute(context, "run_vitest", {"paths": ["frontend/src/features/Foo.test.tsx"]})
     assert sandbox.calls[-1][0] == "frontend"
+    assert sandbox.calls[-1][1] == ["src/features/Foo.test.tsx"]
 
 
 def test_run_tools_reject_unsafe_paths(context: ToolContext) -> None:

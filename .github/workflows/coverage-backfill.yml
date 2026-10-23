@@ -132,6 +132,13 @@ jobs:
           cp -a trusted work/repo
           : > work/empty.diff
 
+      - name: Expose baseline coverage to the agent
+        if: steps.targets.outputs.targets != ''
+        run: |
+          mkdir -p artifacts/fe_coverage
+          cp baseline/backend/be_coverage.json artifacts/be_coverage.json
+          cp baseline/frontend/fe_coverage/coverage-summary.json artifacts/fe_coverage/coverage-summary.json
+
       - name: Run the agent (API key only in this step)
         if: steps.targets.outputs.targets != ''
         working-directory: trusted/ai_test_agent
@@ -140,6 +147,7 @@ jobs:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           TASKLY_AGENT_PROVIDER: ${{ vars.AGENT_PROVIDER || 'anthropic' }}
           TASKLY_AGENT_MODEL: ${{ vars.AGENT_MODEL }}
+          TASKLY_MAX_TURNS: "30"
           TARGETS: ${{ steps.targets.outputs.targets }}
         run: |
           python -m agent \
@@ -214,7 +222,6 @@ jobs:
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: untrusted-backfill-output-${{ github.run_id }}
-          path: artifacts
 
       - name: Run the verification gate
         working-directory: trusted/ai_test_agent
@@ -317,7 +324,6 @@ jobs:
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: verified-backfill-output-${{ github.run_id }}
-          path: verified
 
       - name: Commit the verified tests
         working-directory: trusted/ai_test_agent
