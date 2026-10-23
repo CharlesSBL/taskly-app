@@ -1,0 +1,12 @@
+# Gitleaks configuration.
+#
+# The only findings in the history are the SHA1 hashes that detect-secrets
+# stores in `.secrets.baseline`; they are hashes of fixtures that were already
+# reviewed and allowlisted in that file, not credentials.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "detect-secrets baseline stores hashes, not secrets"
+paths = ['''\.secrets\.baseline$''']
