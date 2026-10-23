@@ -148,6 +148,7 @@ jobs:
           TASKLY_AGENT_PROVIDER: ${{ vars.AGENT_PROVIDER || 'anthropic' }}
           TASKLY_AGENT_MODEL: ${{ vars.AGENT_MODEL }}
           TASKLY_MAX_TURNS: "30"
+          TASKLY_MAX_OUTPUT_TOKENS: "16384"
           TARGETS: ${{ steps.targets.outputs.targets }}
         run: |
           python -m agent \

@@ -219,6 +219,7 @@ jobs:
           TASKLY_AGENT_PROVIDER: ${{ vars.AGENT_PROVIDER || 'anthropic' }}
           TASKLY_AGENT_MODEL: ${{ vars.AGENT_MODEL }}
           TASKLY_MAX_TURNS: "25"
+          TASKLY_MAX_OUTPUT_TOKENS: "16384"
           STACKS: ${{ steps.prefilter.outputs.stacks }}
           LOCKFILE_CHANGED: ${{ steps.lockfiles.outputs.changed }}
         run: |

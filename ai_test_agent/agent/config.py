@@ -160,7 +160,7 @@ class Budgets:
     max_files: int = 15
     max_diff_bytes: int = 40_000
     max_cost_usd: Decimal = Decimal("0.75")
-    max_output_tokens: int = 4096
+    max_output_tokens: int = 8192
 
     @classmethod
     def from_env(cls, mode: Mode) -> Budgets:
@@ -170,7 +170,7 @@ class Budgets:
             max_files=_env_int("TASKLY_MAX_FILES", 15),
             max_diff_bytes=_env_int("TASKLY_MAX_DIFF_BYTES", 40_000),
             max_cost_usd=_env_decimal("TASKLY_MAX_COST_USD", default_cost),
-            max_output_tokens=_env_int("TASKLY_MAX_OUTPUT_TOKENS", 4096),
+            max_output_tokens=_env_int("TASKLY_MAX_OUTPUT_TOKENS", 8192),
         )
 
 

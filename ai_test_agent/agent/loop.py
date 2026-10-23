@@ -154,7 +154,10 @@ def run_agent(runtime: AgentRuntime, user_prompt: str) -> AgentResult:
 
             tool_uses = [block for block in content if getattr(block, "type", None) == "tool_use"]
             if not tool_uses:
-                notes.append("model stopped without calling finish")
+                if getattr(response, "stop_reason", None) == "max_tokens":
+                    notes.append("response truncated at max_tokens before any tool call")
+                else:
+                    notes.append("model stopped without calling finish")
                 break
 
             results: list[dict[str, Any]] = []
