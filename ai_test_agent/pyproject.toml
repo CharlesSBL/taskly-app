@@ -1,0 +1,56 @@
+# Tooling configuration only. The application keeps its own configuration in
+# backend/pyproject.toml, frontend/vite.config.ts and the root pytest.ini.
+#
+# Run everything from this directory:
+#   cd ai_test_agent
+#   ruff check . && ruff format --check .
+#   mypy --strict .
+#   bandit -r agent verifier publisher -ll -c pyproject.toml
+#   pytest selftests --cov=agent --cov=verifier --cov=publisher --cov-fail-under=85
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["sandbox"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "PIE", "RUF"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+warn_unused_ignores = true
+show_error_codes = true
+pretty = true
+
+[[tool.mypy.overrides]]
+module = ["anthropic.*"]
+follow_untyped_imports = true
+
+[tool.bandit]
+exclude_dirs = [".venv", "selftests", "sandbox"]
+skips = []
+
+[tool.pytest.ini_options]
+testpaths = ["selftests"]
+pythonpath = ["."]
+addopts = "-ra --strict-markers"
+
+[tool.coverage.run]
+source = ["agent", "verifier", "publisher"]
+branch = true
+omit = ["*/__main__.py"]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+fail_under = 85
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]

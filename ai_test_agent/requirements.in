@@ -1,0 +1,25 @@
+# Tooling-only dependencies for the AI unit-test agent.
+#
+# These are deliberately kept out of backend/requirements.txt: the agent,
+# verifier and publisher are separate packages and must not alter the app's
+# runtime dependency set. Everything needed to run the app's own tests comes
+# from backend/requirements.txt and frontend/package-lock.json inside the
+# sandbox, exactly as the app ships them.
+#
+# Regenerate the hashed lock file:
+#   cd ai_test_agent
+#   pip-compile --generate-hashes --output-file=requirements.lock requirements.in
+anthropic==2.1.0
+bandit==1.9.4
+detect-secrets==1.5.0
+mypy==2.4.0
+pip-audit==2.10.1
+pre-commit==4.7.0
+pydantic==2.14.1
+PyYAML==6.0.3
+pytest==9.1.1
+pytest-cov==7.1.0
+ruff==0.17.2
+shellcheck-py==0.11.0.1
+types-PyYAML==6.0.12.20260906
+zizmor==1.31.1

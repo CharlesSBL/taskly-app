@@ -1,0 +1,95 @@
+# Tooling-only pre-commit pipeline.
+#
+# Requires the tooling virtualenv at .venv:
+#   python3 -m venv .venv
+#   .venv/bin/pip install -r tools/requirements.lock
+#   .venv/bin/pre-commit install
+#
+# Docker-backed hooks (hadolint, actionlint) need a running Docker daemon.
+default_install_hook_types: [pre-commit]
+default_stages: [pre-commit]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+      - id: end-of-file-fixer
+        # The README is shipped as-is by the application baseline.
+        exclude: ^README\.md$
+      - id: trailing-whitespace
+      - id: detect-private-key
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.2
+    hooks:
+      - id: ruff-check
+        args: ["--fix"]
+        files: ^ai_test_agent/(agent|verifier|publisher|selftests)/
+      - id: ruff-format
+        files: ^ai_test_agent/(agent|verifier|publisher|selftests)/
+
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+
+  - repo: https://github.com/hadolint/hadolint
+    rev: v2.15.1
+    hooks:
+      # The application's own Dockerfiles are shipped as-is.
+      - id: hadolint-docker
+        exclude: ^(backend|frontend)/
+
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.12
+    hooks:
+      - id: actionlint-docker
+
+  - repo: https://github.com/zizmorcore/zizmor-pre-commit
+    rev: v1.31.1
+    hooks:
+      - id: zizmor
+
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: ["--baseline", ".secrets.baseline"]
+        exclude: ^frontend/package-lock\.json$
+
+  - repo: local
+    hooks:
+      - id: mypy-strict
+        name: mypy --strict (tooling packages)
+        entry: bash -c 'cd ai_test_agent && .venv/bin/mypy --strict agent verifier publisher'
+        language: system
+        pass_filenames: false
+        files: ^ai_test_agent/(agent|verifier|publisher)/
+
+      - id: bandit
+        name: bandit (tooling packages)
+        entry: bash -c 'cd ai_test_agent && .venv/bin/bandit -r agent verifier publisher -ll -c pyproject.toml'
+        language: system
+        pass_filenames: false
+        files: ^ai_test_agent/(agent|verifier|publisher)/
+
+      - id: pytest-tooling
+        name: pytest (tooling, coverage >= 85%)
+        entry: >-
+          bash -c 'cd ai_test_agent && .venv/bin/pytest selftests
+          --cov=agent --cov=verifier --cov=publisher --cov-fail-under=85'
+        language: system
+        pass_filenames: false
+        files: ^ai_test_agent/(agent|verifier|publisher|selftests)/
+
+      - id: actions-sha-pinned
+        name: GitHub Actions must be pinned to a full commit SHA
+        entry: bash -c 'cd ai_test_agent && .venv/bin/python -m verifier.action_pins ../.github/workflows'
+        language: system
+        pass_filenames: false
+        files: ^\.github/(workflows|actions)/

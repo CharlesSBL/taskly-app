@@ -12,3 +12,14 @@ htmlcov/
 *.db-wal
 .env
 .DS_Store
+
+# AI unit-test agent run artifacts
+agent_manifest.json
+agent_trace.json
+pr_report.md
+*.patch
+
+# Tooling caches
+.mypy_cache/
+.ruff_cache/
+.agent-work/
