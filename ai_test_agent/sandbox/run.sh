@@ -70,12 +70,17 @@ case "$stack" in
 esac
 
 case "$mode" in
-    tests | coverage) ;;
+    tests | coverage | typecheck) ;;
     *)
         echo "unsupported mode: $mode" >&2
         exit 2
         ;;
 esac
+
+if [ "$mode" = "typecheck" ] && [ "$stack" != "frontend" ]; then
+    echo "typecheck is only available for the frontend" >&2
+    exit 2
+fi
 
 if [ ! -d "$repo/backend" ] || [ ! -d "$repo/frontend" ]; then
     echo "not a taskly checkout: $repo" >&2
@@ -144,7 +149,9 @@ if [ "$stack" = "backend" ]; then
             "$@"
     fi
 else
-    if [ "$mode" = "coverage" ]; then
+    if [ "$mode" = "typecheck" ]; then
+        run_container npx tsc --noEmit
+    elif [ "$mode" = "coverage" ]; then
         run_container npx vitest run \
             --coverage \
             --coverage.reportsDirectory=/out/fe_coverage \

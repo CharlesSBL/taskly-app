@@ -13,10 +13,16 @@ ai_test_agent/sandbox/run.sh --stack backend --repo . --out /tmp/be --mode cover
 # Frontend tests with coverage
 ai_test_agent/sandbox/run.sh --stack frontend --repo . --out /tmp/fe --mode coverage
 
+# Frontend typecheck (used by the verifier)
+ai_test_agent/sandbox/run.sh --stack frontend --repo . --out /tmp/fe --mode typecheck
+
 # A subset, with extra arguments passed through
 ai_test_agent/sandbox/run.sh --stack backend --repo . -- \
   tests/features/todos/test_repository.py -q
 ```
+
+Test paths passed after `--` are relative to the stack directory
+(`tests/...`, not `backend/tests/...`).
 
 Coverage reports are written to the `--out` directory
 (`be_coverage.json`, `fe_coverage/`). The directory is created if needed and

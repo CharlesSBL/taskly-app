@@ -66,3 +66,29 @@ class CoverageDelta:
             "after": self.after,
             "delta": self.delta,
         }
+
+
+@dataclass
+class VerificationReport:
+    status: GateStatus
+    accepted_stacks: list[str]
+    reverted_stacks: dict[str, list[str]]
+    coverage: dict[str, dict[str, object]]
+    differential: dict[str, str]
+    patch_sha256: str
+    notes: list[str] = field(default_factory=list)
+
+    # The patch itself is not serialized into the report; it is written to disk
+    # next to this JSON so the sha256 can be re-verified by the publisher.
+    verified_patch: str = ""
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "status": self.status,
+            "accepted_stacks": list(self.accepted_stacks),
+            "reverted_stacks": {key: list(value) for key, value in self.reverted_stacks.items()},
+            "coverage": dict(self.coverage),
+            "differential": dict(self.differential),
+            "patch_sha256": self.patch_sha256,
+            "notes": list(self.notes),
+        }
