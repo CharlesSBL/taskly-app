@@ -6,7 +6,7 @@ from fastapi import FastAPI
 
 import app.core.lifespan as lifespan_module
 
-DATABASE_URL = "postgresql+psycopg://taskly:taskly@localhost:5432/taskly"
+DATABASE_URL = "postgresql+psycopg://taskly:taskly@localhost:5432/taskly"  # pragma: allowlist secret
 
 
 @pytest.fixture

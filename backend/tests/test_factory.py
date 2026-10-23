@@ -7,7 +7,7 @@ from fastapi import FastAPI
 
 import app.factory as factory_module
 
-RESOLVED_URL = "postgresql+psycopg://taskly:taskly@localhost:5432/taskly"
+RESOLVED_URL = "postgresql+psycopg://taskly:taskly@localhost:5432/taskly"  # pragma: allowlist secret
 
 
 @pytest.fixture
@@ -17,7 +17,7 @@ def resolver(monkeypatch):
     return resolver
 
 
-@pytest.mark.parametrize("database_url", [None, "postgresql+psycopg://override:secret@db:5432/x"])
+@pytest.mark.parametrize("database_url", [None, "postgresql+psycopg://override:secret@db:5432/x"])  # pragma: allowlist secret
 def test_stores_the_resolved_database_url_on_app_state(database_url, resolver):
     application = factory_module.create_app(database_url)
 

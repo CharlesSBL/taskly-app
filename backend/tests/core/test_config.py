@@ -2,15 +2,15 @@ import pytest
 
 from app.core.config import resolve_database_url
 
-ENV_DATABASE_URL = "postgresql+psycopg://env-user:env-pass@env-host:5432/env-db"
+ENV_DATABASE_URL = "postgresql+psycopg://env-user:env-pass@env-host:5432/env-db"  # pragma: allowlist secret
 POSTGRES_SETTINGS = {
     "POSTGRES_USER": "taskly",
-    "POSTGRES_PASSWORD": "s3cret",
+    "POSTGRES_PASSWORD": "s3cret",  # pragma: allowlist secret
     "POSTGRES_HOST": "db.internal",
     "DB_PORT": "5433",
     "POSTGRES_DB": "taskly_test",
 }
-EXPECTED_GENERATED_URL = "postgresql+psycopg://taskly:s3cret@db.internal:5433/taskly_test"
+EXPECTED_GENERATED_URL = "postgresql+psycopg://taskly:s3cret@db.internal:5433/taskly_test"  # pragma: allowlist secret
 
 
 @pytest.fixture
@@ -26,7 +26,7 @@ def test_explicit_database_url_wins_over_the_environment(postgres_settings):
 
     resolved = resolve_database_url("postgresql+psycopg://explicit:secret@host:5432/db")
 
-    assert resolved == "postgresql+psycopg://explicit:secret@host:5432/db"
+    assert resolved == "postgresql+psycopg://explicit:secret@host:5432/db"  # pragma: allowlist secret
 
 
 @pytest.mark.parametrize("database_url", [None, ""])
