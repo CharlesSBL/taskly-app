@@ -186,6 +186,13 @@ jobs:
             stacks="${stacks:+$stacks,}frontend"
           fi
           echo "stacks=$stacks" >> "$GITHUB_OUTPUT"
+          : > work/agent-files.txt
+          case ",$stacks," in
+            *",backend,"*) grep '^backend/' work/changed.txt >> work/agent-files.txt || true ;;
+          esac
+          case ",$stacks," in
+            *",frontend,"*) grep '^frontend/' work/changed.txt >> work/agent-files.txt || true ;;
+          esac
           {
             echo "## AI unit-test agent"
             echo ""
@@ -212,7 +219,7 @@ jobs:
             --skills-dir ../.claude/skills
             --agent-definition ../.claude/agents/unit-test-agent.md
             --sandbox-script sandbox/run.sh
-            --changed-files "$(tr '\n' ',' < ../../work/changed.txt)"
+            --changed-files "$(tr '\n' ',' < ../../work/agent-files.txt)"
             --baseline-json ../../baseline/baseline.json
           )
           if [ "$LOCKFILE_CHANGED" = "true" ]; then
