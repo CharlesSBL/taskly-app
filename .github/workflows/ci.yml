@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tooling:
+    name: Tooling gates
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: ai_test_agent
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: ai_test_agent/requirements.lock
+
+      - name: Install tooling (hashed lock)
+        run: pip install --require-hashes -r requirements.lock
+
+      - name: Ruff lint and format
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: mypy (strict)
+        run: mypy --strict agent verifier publisher
+
+      - name: bandit
+        run: bandit -r agent verifier publisher -ll -c pyproject.toml
+
+      - name: pip-audit
+        run: pip-audit -r requirements.lock
+
+      - name: shellcheck
+        run: find sandbox -name '*.sh' -print0 | xargs -0 -r shellcheck
+
+      - name: actionlint
+        run: |
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/repo" -w /repo \
+            rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 \
+            -color
+
+      - name: zizmor
+        run: zizmor --format plain ../.github/workflows ../.github/dependabot.yml
+
+      - name: GitHub Actions must be pinned to commit SHAs
+        run: python -m verifier.action_pins ../.github/workflows
+
+  app:
+    name: Application tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        # The application lock file is not hash-pinned; pin versions and use
+        # binary wheels only instead (verified: every dependency ships one).
+        run: "python -m pip install --only-binary=:all: -r backend/requirements.txt"
+
+      - name: Backend tests
+        working-directory: backend
+        run: python -m pytest --cov=app --cov-report=term-missing
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --ignore-scripts
+
+      - name: Frontend typecheck
+        working-directory: frontend
+        run: npm run typecheck
+
+      - name: Frontend format check
+        working-directory: frontend
+        run: npm run format:check
+
+      - name: Frontend tests with coverage
+        working-directory: frontend
+        run: npm run test:coverage
