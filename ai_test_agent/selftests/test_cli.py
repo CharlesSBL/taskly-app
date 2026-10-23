@@ -12,6 +12,13 @@ from agent.definition import REQUIRED_TOOLS
 from agent.manifest import load_manifest
 
 
+@pytest.fixture(autouse=True)
+def anthropic_branch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Most CLI tests cover the Anthropic branch; DeepSeek tests override this."""
+    monkeypatch.setenv("TASKLY_AGENT_PROVIDER", "anthropic")
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+
+
 class FakeMessages:
     def __init__(self, responses: list[Any]) -> None:
         self.responses = responses
@@ -226,3 +233,35 @@ def test_deepseek_missing_key_fails_closed(
     repo, definition, skills = make_workspace(tmp_path)
     assert main(base_args(tmp_path, repo, definition, skills)) == 2
     assert "DEEPSEEK_API_KEY is not set" in capsys.readouterr().err
+
+
+def test_deepseek_is_the_default_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Without TASKLY_AGENT_PROVIDER the CLI must use the live-tested provider."""
+    monkeypatch.delenv("TASKLY_AGENT_PROVIDER", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "dsk-test-key")  # pragma: allowlist secret
+    repo, definition, skills = make_workspace(tmp_path)
+    client = FakeClient(
+        [
+            message(
+                tool_block(
+                    "finish",
+                    {"decisions": [{"file": "README.md", "action": "skip", "rationale": "docs"}]},
+                )
+            )
+        ]
+    )
+    captured: dict[str, Any] = {}
+
+    def fake_anthropic(**kwargs: Any) -> FakeClient:
+        captured.update(kwargs)
+        return client
+
+    monkeypatch.setattr("agent.cli.anthropic.Anthropic", fake_anthropic)
+
+    assert main(base_args(tmp_path, repo, definition, skills)) == 0
+    assert captured["base_url"] == "https://api.deepseek.com/anthropic"
+    assert load_manifest(tmp_path / "out" / "agent_manifest.json").model == "deepseek-flash"
+    capsys.readouterr()

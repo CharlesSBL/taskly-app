@@ -102,7 +102,9 @@ def make_runtime(
         system_prompt="You write tests.",
     )
     return AgentRuntime(
-        settings=Settings(budgets=budgets or Budgets()),
+        # The cost assertions below use the Anthropic table; the provider
+        # default itself is covered by the config and CLI tests.
+        settings=Settings(provider="anthropic", budgets=budgets or Budgets()),
         client=cast(AnthropicClient, client),
         definition=definition,
         skills=make_skills(tmp_path),
@@ -209,6 +211,17 @@ def test_model_stopping_without_finish_is_an_error(tmp_path: Path) -> None:
     result = run_agent(make_runtime(tmp_path, client), "prompt")
     assert result.manifest.status == "error"
     assert any("without calling finish" in note for note in result.trace.notes)
+
+
+def test_truncated_response_is_reported_and_uses_the_configured_cap(tmp_path: Path) -> None:
+    """Regression: a DeepSeek response cut at max_tokens must be explained."""
+    client = FakeClient([message(text_block("I will write"), stop="max_tokens")])
+    budgets = Budgets(max_output_tokens=16384)
+    result = run_agent(make_runtime(tmp_path, client, budgets=budgets), "prompt")
+
+    assert client.messages.calls[0]["max_tokens"] == 16384
+    assert result.manifest.status == "error"
+    assert any("truncated at max_tokens" in note for note in result.trace.notes)
 
 
 def test_invalid_finish_is_reported_and_can_be_retried(tmp_path: Path) -> None:

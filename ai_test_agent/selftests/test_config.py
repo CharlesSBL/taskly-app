@@ -7,11 +7,21 @@ import pytest
 from agent.config import Budgets, ConfigError, Price, Settings
 
 
-def test_default_model_is_priced() -> None:
+def test_the_live_tested_provider_is_the_default() -> None:
     settings = Settings()
+    assert settings.provider == "deepseek"
+    assert settings.model == "deepseek-flash"
+    assert settings.price.input == Decimal("0.30")
+    assert settings.price.output == Decimal("1.20")
+    assert settings.api_key_env == "DEEPSEEK_API_KEY"  # pragma: allowlist secret
+
+
+def test_anthropic_is_still_available_as_an_opt_in() -> None:
+    settings = Settings(provider="anthropic")
     assert settings.model == "claude-sonnet-5-5"
     assert settings.price.input == Decimal("2")
     assert settings.price.output == Decimal("10")
+    assert settings.base_url is None
 
 
 def test_unknown_model_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:

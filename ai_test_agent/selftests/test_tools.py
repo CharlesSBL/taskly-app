@@ -226,15 +226,16 @@ def test_get_diff_wraps_and_enforces_budget(context: ToolContext) -> None:
         execute(context, "get_diff", {})
 
 
-def test_run_tools_go_through_the_sandbox(context: ToolContext) -> None:
+def test_run_tools_pass_stack_relative_paths_to_the_sandbox(context: ToolContext) -> None:
+    """Regression: the sandbox runs with cwd=<stack>, so paths lose the prefix."""
     sandbox = context.sandbox
     assert isinstance(sandbox, FakeSandbox)
     result = execute(
         context,
         "run_pytest",
-        {"paths": ["backend/tests/test_existing.py"]},
+        {"paths": ["backend/tests/test_existing.py", "backend/tests/test_both.py"]},
     )
-    assert sandbox.calls == [("backend", ["tests/test_existing.py"], False)]
+    assert sandbox.calls == [("backend", ["tests/test_existing.py", "tests/test_both.py"], False)]
     assert "exit code: 0" in result
     assert "1 passed" in result
 

@@ -91,6 +91,11 @@ DEEPSEEK_PRICES: dict[str, Price] = {
 # Backwards-compatible alias for the Anthropic table.
 PRICES = ANTHROPIC_PRICES
 
+# The default is the provider whose path is exercised by the live runs
+# documented in SOLUTION.md. Anthropic is still fully supported through
+# TASKLY_AGENT_PROVIDER=anthropic; it is opt-in because no live run has been
+# recorded for it yet.
+DEFAULT_PROVIDER: Provider = "deepseek"
 DEFAULT_MODEL = "claude-sonnet-5-5"
 
 
@@ -176,7 +181,7 @@ class Budgets:
 
 @dataclass(frozen=True)
 class Settings:
-    provider: Provider = "anthropic"
+    provider: Provider = DEFAULT_PROVIDER
     model: str = ""
     budgets: Budgets = field(default_factory=Budgets)
 
@@ -219,8 +224,8 @@ class Settings:
 
     @classmethod
     def from_env(cls, mode: Mode = "pr") -> Settings:
-        provider = os.environ.get("TASKLY_AGENT_PROVIDER", "anthropic").strip().lower()
-        provider = provider or "anthropic"
+        provider = os.environ.get("TASKLY_AGENT_PROVIDER", DEFAULT_PROVIDER).strip().lower()
+        provider = provider or DEFAULT_PROVIDER
         if provider not in PROVIDERS:
             known = ", ".join(sorted(PROVIDERS))
             raise ConfigError(f"unknown provider {provider!r}; known providers: {known}")
