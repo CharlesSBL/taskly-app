@@ -19,8 +19,6 @@ repos:
       - id: check-added-large-files
         args: ["--maxkb=1024"]
       - id: end-of-file-fixer
-        # The README is shipped as-is by the application baseline.
-        exclude: ^README\.md$
       - id: trailing-whitespace
       - id: detect-private-key
 

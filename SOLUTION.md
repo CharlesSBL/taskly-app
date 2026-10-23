@@ -10,11 +10,13 @@ through a sandboxed verification gate before a human can commit them.
 - Workflows: `.github/workflows/unit-test-agent.yml` (PR) and
   `coverage-backfill.yml` (manual backfill)
 
-**Provider note.** The default provider is DeepSeek
-(`deepseek-flash` over its Anthropic-compatible Messages API) because that is
-the path with recorded live runs. Anthropic (`claude-sonnet-5-5`) is fully
-supported and selected with `TASKLY_AGENT_PROVIDER=anthropic` plus
-`ANTHROPIC_API_KEY`, but no live run on it is recorded here.
+**Provider and data flow.** The default provider is DeepSeek
+(`deepseek-flash`, over its Anthropic-compatible Messages API) because that is
+the path with recorded live runs; Anthropic (`claude-sonnet-5-5`) is opt-in
+through `TASKLY_AGENT_PROVIDER=anthropic` and has no live run here. The default
+sends the diff and the files the agent reads to a third-party API, so it is
+external processing: use an approved provider with retention terms and never
+point it at secrets or code you may not share (see Limitations).
 
 ## Architecture
 
@@ -47,19 +49,22 @@ flowchart LR
   publisher --> j4
 ```
 
+`agent/definition.py` reads the agent file's frontmatter (name, model key, tool
+allowlist) and body (system prompt); `agent/skills.py` keeps only a skill's name
+and description in the prompt until `activate_skill` returns its body and
+records the activation.
+
 ## Decisions
 
 | Decision | Rationale | Trade-off |
 | --- | --- | --- |
-| Custom tool-use loop on the official `anthropic` SDK | Every API call, tool call and token count is auditable; no framework hides the control flow | We own retries and message plumbing |
-| Provider abstraction: DeepSeek by default, Anthropic opt-in | DeepSeek exposes an Anthropic-compatible Messages API, so the same SDK, tools and loop work unchanged; the key, base URL, default model and price table are selected in one place. The default is the provider with recorded live runs | A second price table to maintain, and DeepSeek peak rates are used for budgets |
-| Direct SDK instead of LangGraph or similar | Fewer dependencies, clearer security boundary, nothing to keep in sync with the model API | No framework features (persistence, graph visualization) |
+| Custom tool-use loop on the official `anthropic` SDK | Every call and token count is auditable; no framework hides the control flow | We own retries and message plumbing |
+| Provider abstraction: DeepSeek by default, Anthropic opt-in | One SDK, one loop; the key, base URL, model and price table are selected in one place, and the default is the provider with live-run evidence | A second price table; DeepSeek peak rates set the budget |
 | All tooling runs from the trusted base checkout | The PR cannot change the code that holds the key or makes decisions | Tooling changes need their own PR before a demo PR |
 | Patch posted by default, commit opt-in via label | The patch is reviewable and a human decides what lands | A second action is required to commit |
 | Per-stack baseline and per-stack revert | A broken backend baseline must not block a healthy frontend | More sandbox runs per PR |
-| Differential fail-on-base signal | Shows whether the new tests actually exercise changed behavior | It is evidence, not proof; new source files are `n/a` |
+| Differential fail-on-base signal | Shows whether the new tests actually exercise changed behavior | Evidence, not proof; new source files are `n/a` |
 | Strict manifest schema + independent integrity rules | Model output is untrusted and the verifier does not share the agent's path logic | Some duplication between agent and verifier |
-| Cost is computed from response usage | No estimates; cache reads/writes are priced separately | Prices must be updated when the model changes |
 | Coverage backfill reuses the same gate | One definition of "verified" everywhere | Backfill is serial and slower |
 
 ## How to run
@@ -69,8 +74,8 @@ Prerequisites:
 1. Repository secret `DEEPSEEK_API_KEY` (default provider) or
    `ANTHROPIC_API_KEY` with the repository variable
    `AGENT_PROVIDER=anthropic`.
-2. Actions → General → Workflow permissions: read-only, and "Allow GitHub
-   Actions to create and approve pull requests" enabled.
+2. Workflow permissions read-only, with "Allow GitHub Actions to create and
+   approve pull requests" enabled.
 3. Label `ai-tests:commit`.
 
 Pull request flow: open, push to, reopen or label a PR. Add
@@ -87,107 +92,44 @@ Local run (same gate):
 cd ai_test_agent
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.lock
-export TASKLY_AGENT_PROVIDER=deepseek   # the default; use anthropic to opt in
-export DEEPSEEK_API_KEY=...             # ANTHROPIC_API_KEY for Anthropic
+export TASKLY_AGENT_PROVIDER=deepseek   # default; anthropic to opt in
+export DEEPSEEK_API_KEY=...             # ANTHROPIC_API_KEY to opt in
 .venv/bin/python -m agent --mode pr \
   --repo ../pr --diff ../pr.diff --out ../artifacts \
   --skills-dir ../.claude/skills \
   --agent-definition ../.claude/agents/unit-test-agent.md \
   --sandbox-script sandbox/run.sh
-.venv/bin/python -m verifier --verify-only \
-  --pr-dir ../pr --trusted-dir .. --base-sha "$(git rev-parse HEAD)" \
-  --manifest ../artifacts/agent_manifest.json \
-  --patch ../artifacts/candidate_tests.patch --out ../verified
+# then the verifier command shown by `python -m verifier --help`
 ```
-
-## How the agent and skills load
-
-`agent/definition.py` reads `.claude/agents/unit-test-agent.md`: the
-frontmatter declares name, description, model key and allowed tools, the body
-becomes the system prompt. `agent/skills.py` reads
-`.claude/skills/*/SKILL.md`; only name and description are in the prompt until
-the model calls `activate_skill`, which returns the body and records the
-activation in the trace.
 
 ## Example run
 
-Every row below is a real workflow run on the DeepSeek default; nothing is
-simulated. The report and a trimmed trace of the demo PR are committed under
-`docs/evidence/` because Actions artifacts expire.
+Every row is a real workflow run on the DeepSeek default. One run's report and
+trimmed trace are committed under `docs/evidence/` because artifacts expire.
 
 | Run | Result | Cost |
 | --- | --- | --- |
 | [Backfill #10](https://github.com/CharlesSBL/taskly-app/actions/runs/39901769430) → [PR #10](https://github.com/CharlesSBL/taskly-app/pull/10), merged `dda5cd3` | Backend 42.42% → 47.88%, frontend 47.68% → 49.00%; 3 new test files, 18 turns | $0.0173 |
-| [Demo #11](https://github.com/CharlesSBL/taskly-app/actions/runs/39927537759) → [PR #11](https://github.com/CharlesSBL/taskly-app/pull/11) | 7 decisions (2 create, 4 update, 1 skip), both stacks accepted, backend 47.88% → 51.69% (+3.81), frontend 49.00% → 51.57% (+2.57), fail-on-base for the 3 updated files, 20 turns, 14,688 in / 17,743 out, opt-in commit [`a3a6240`](https://github.com/CharlesSBL/taskly-app/commit/a3a6240) | $0.0275 |
+| [Demo #11](https://github.com/CharlesSBL/taskly-app/actions/runs/39927537759) → [PR #11](https://github.com/CharlesSBL/taskly-app/pull/11) | 7 decisions (2 create, 4 update, 1 skip), both stacks accepted, backend 47.88% → 51.69%, frontend 49.00% → 51.57%, fail-on-base hit for the 3 updated files, 20 turns, opt-in commit [`a3a6240`](https://github.com/CharlesSBL/taskly-app/commit/a3a6240) | $0.0275 |
 | [Demo #12](https://github.com/CharlesSBL/taskly-app/actions/runs/39928204014) → [PR #12](https://github.com/CharlesSBL/taskly-app/pull/12) | Docs-only change: `nothing_to_test`, 0 turns, model `not-run` | $0.0000 |
 | [Backfill #13](https://github.com/CharlesSBL/taskly-app/actions/runs/39929977475) → [PR #13](https://github.com/CharlesSBL/taskly-app/pull/13), merged `805befb` | Frontend 49.00% → 61.58% (+12.58) accepted; backend reverted because the generated tests failed | $0.0518 |
 | [Backfill #14](https://github.com/CharlesSBL/taskly-app/actions/runs/39932704982) → [PR #14](https://github.com/CharlesSBL/taskly-app/pull/14), merged `75dce16` | Backend 47.88% → 98.79% (+50.91); six files, three created and three updated | $0.0354 |
 | [Backfill #15](https://github.com/CharlesSBL/taskly-app/actions/runs/39933376858) → [PR #15](https://github.com/CharlesSBL/taskly-app/pull/15), merged `8d0d4d5` | Frontend 61.58% → 81.45% (+19.87) | $0.0582 |
-| [Backfill #16](https://github.com/CharlesSBL/taskly-app/actions/runs/39934359334) → [PR #16](https://github.com/CharlesSBL/taskly-app/pull/16), closed unmerged | Backend 98.79% → 100.00%, frontend 81.45% → 96.68%, but three files were not Prettier-formatted and the gate of the time did not check: closed and re-verified after the fix | $0.0460 |
+| [Backfill #16](https://github.com/CharlesSBL/taskly-app/actions/runs/39934359334) → [PR #16](https://github.com/CharlesSBL/taskly-app/pull/16), closed unmerged | Backend 100%, frontend 96.68%, but three files failed `prettier --check`, which the gate did not run then: closed and re-verified after the fix | $0.0460 |
 | [Backfill #17](https://github.com/CharlesSBL/taskly-app/actions/runs/39938721832) → [PR #17](https://github.com/CharlesSBL/taskly-app/pull/17), merged `4b55d7d` | Backend 98.79% → 100.00% (+1.21), frontend 81.45% → 92.71% (+11.26), accepted by the gate that now runs Prettier | $0.0376 |
 
-Coverage on `main` is now **100.00% backend and 92.71% frontend**, up from
-42.42% and 47.68%. The frontend took four accepted-or-rejected runs and about
-$0.19 to gain 45 points, roughly $0.004 per point; the backend reaches 100%
-because its uncovered surface was small and highly testable. What remains
-uncovered on the frontend is mostly error-handling branches that need a
-browser environment this sandbox does not provide.
-
-Across the thirteen live runs recorded here (including one rejected stack and
-two runs that produced no PR) the total spend is **$0.47**, summed from each
-manifest's `cost_usd` rather than estimated.
-
-## What the live runs changed
-
-The runs were not only demos: each failure produced a tooling fix, a regression
-test and a line in the table below.
-
-| Defect the run exposed | Fix | Regression test |
-| --- | --- | --- |
-| The sandbox received `backend/...` although it runs with `cwd=backend`, so zero tests were collected | strip the stack prefix in `_run` (`80199c8`) | `test_tools.py::test_run_tools_pass_stack_relative_paths_to_the_sandbox` |
-| `run_pytest` rejected `backend/tests`, so the agent verified single files | accept a directory inside the test roots (`c67ca67`) | `test_tools.py::test_run_tools_accept_a_test_directory` |
-| A wrong first draft could not be rewritten in the same run | allow rewrites, charge the first write only (`eb50240`) | `test_tools.py::test_write_can_rewrite_the_same_file_without_charging_the_budget` |
-| A rewrite loop could spend the whole budget on one file | per-file write cap of 3 | `test_tools.py::test_write_is_capped_per_file` |
-| A backend line over the gate's 100 characters reverted a stack | reject at write time, single constant in `lint_policy.py` (`edb4676`) | `test_tools.py::test_write_rejects_a_backend_line_longer_than_the_lint_limit` |
-| The gate did not run Prettier, so unformatted files reached `main` | run `tsc` and `prettier --check` on the generated files (`30e7c21`) | `test_gate.py` frontend typecheck test, `run_lint` tool tests |
-| The full suite could fail without reverting the stack | require the coverage run to succeed (`30e7c21`) | `test_gate.py::test_failing_full_suite_reverts_the_stack` |
-| A closed backfill PR left a stale branch the next run reused | reset the bot branch from the default branch, push with a lease (`7fc1346`) | `test_commit.py::test_force_push_uses_a_lease_on_the_bot_branch` |
-| Publisher resolved a relative patch path after `git -C` | resolve before calling git (`9d255c3`) | `test_commit.py::test_relative_patch_path_is_resolved_before_git` |
-| A skipped job suppressed the verification gate | `if: always()` on the gate and no conditional dependency (`46a7b34`) | `test_workflows.py::test_verifier_always_runs_after_the_agent_job` |
-| Artifact download nested the patch under an extra directory | download at the workspace root (`4c90556`) | `test_workflows.py::test_artifact_downloads_are_not_nested_under_a_path` |
-| A truncated provider response looked like a normal stop | explicit note and a larger cap (`4441245`) | `test_loop.py::test_truncated_response_is_reported_and_uses_the_configured_cap` |
-| A transient provider error lost the whole run | three retries with backoff, trace always uploaded (`2459d89`) | `test_loop.py::test_transient_api_errors_are_retried` |
-
-## Security checklist
-
-| Control | How it is enforced |
-| --- | --- |
-| Trusted checkout for key-holding and gate code | Jobs 1–3 checkout the base SHA into `trusted/`; the head is a separate `pr/` tree |
-| Least privilege | `permissions: {}` at workflow level; per-job read; commit job only has `contents: write` |
-| API keys only in the agent step | `env:` on that single step; verifier/publisher jobs have no secrets; the provider key is read from config |
-| `pull_request`, not `pull_request_target` | Workflow trigger; forks are skipped with a step summary |
-| Untrusted diff/files and model output | `<untrusted_source_data>` wrapping, escaped closing tag, strict schemas, independent verifier allowlists |
-| Lockfile changes | Dependencies always come from the base revision's lock files; the report warns when the PR changed them |
-| Labeler authorization | `gh api .../collaborators/{login}/permission`; only `admin` or `write` |
-| Same-repo only for commit | `head.repo.full_name == github.repository` |
-| Action pinning | Every `uses:` is a 40-character SHA; `verifier.action_pins` fails the build otherwise |
-| Dependabot | actions, pip (`/ai_test_agent`), npm (`/frontend`) |
-| Sandbox | no network, read-only mounts, non-root, caps dropped, resource limits, tmpfs |
-| Cost and loop control | `max_turns`, `max_files`, `max_diff_bytes`, `$0.75`/`$5.00` ceilings, concurrency per PR, bot guard, label events never re-run the agent |
-| Fail on base | Worktree of the base SHA, per-file `true`/`false`/`n/a` |
-| Patch integrity | sha256 re-checked twice (verifier output and publisher), allowlist and `git apply --numstat` agreement |
-| No artifact code execution in the publisher | Publisher only reads the patch and report |
-| Redaction | Trace writer redacts credentials recursively and truncates fields |
-| Fail closed | Unknown model, malformed manifest, unreadable permission or bad sha all stop |
+Coverage on `main` is **100.00% backend and 92.71% frontend**, up from 42.42%
+and 47.68%. The frontend gained 45 points across four runs for about $0.19
+(roughly $0.004 per point); what remains is mostly error branches that need a
+browser. Across the thirteen live runs, including two that produced no PR, the
+total spend is **$0.47**, summed from each manifest's `cost_usd`.
 
 ## Assumptions
 
 - The base revision is a git checkout with the PR's base commit available.
 - The repository uses `main` by default.
 - Backend tests run with `cwd=backend`; frontend tests with `cwd=frontend`.
-- The provider is `deepseek` by default and Anthropic is opt-in, so the
-  provider with live-run evidence is the one a reviewer gets by default.
-  Prices for both providers were verified on 2026-10-23; DeepSeek budgets use
+- Prices for both providers were verified on 2026-10-23; DeepSeek budgets use
   the higher peak-hour rates.
 - The app's lock file is not hash-pinned, so the sandbox uses binary wheels
   only; the tooling's own lock file is hash-pinned.
@@ -196,75 +138,53 @@ test and a line in the table below.
 
 Four limitations matter most:
 
-1. **A push made with `GITHUB_TOKEN` does not trigger workflows.** The commit
-   job pushes with `GITHUB_TOKEN`, so `ci.yml` does not run on that commit and
-   required checks will not re-evaluate it. That is one reason the commit is
-   opt-in and the patch is the default; the verified patch and its sha256 are
-   already recorded in the sticky comment.
-2. **A pull request can edit the workflow files.** The agent and the gate are
-   read from the trusted base revision, but nothing stops a PR from changing
-   `.github/workflows/`. Protecting those paths with CODEOWNERS or branch
-   protection is a repository setting outside the workflow.
-3. **Prompt injection cannot be eliminated.** Wrapping untrusted content,
-   path allowlists, strict schemas and the independent gate reduce the impact;
-   they do not make the model trustworthy.
+1. **`GITHUB_TOKEN` pushes do not trigger workflows.** The commit job's commit
+   never runs `ci.yml`, so required checks are not re-evaluated. That is why
+   commit is opt-in and the patch is the default; the verified patch and its
+   sha256 are already in the comment.
+2. **A PR can edit the workflow files.** The agent and the gate come from the
+   base revision, but nothing stops a PR from changing `.github/workflows/`;
+   protect those paths with CODEOWNERS or branch protection.
+3. **Prompt injection cannot be eliminated.** Wrapping, allowlists, strict
+   schemas and the independent gate reduce the impact; they do not make the
+   model trustworthy.
 4. **Fail-on-base is a heuristic.** A test can pass on both revisions and
    still be useful, and a test that fails on base may fail for an unrelated
-   reason. It is evidence for a reviewer, not proof of regression sensitivity.
+   reason.
 
 The rest:
 
-- Forks are skipped; there is no fork execution path.
-- Model output is non-deterministic; the gate is the stable contract.
-- DeepSeek prices differ between peak and off-peak hours; costs are estimated
-  at peak rates, so the reported figure is an upper bound outside peak hours.
-- Backfill selects at most `3 × max_batches` modules in one agent run with a
-  single $5 ceiling, rather than several independent runs. With nine targets
-  the 30-turn budget ran out before `finish` and the run was rejected; the
-  turn budget was raised to 45 and batches were kept to six targets.
-- Backfill cannot create tests for code it cannot exercise: files that need a
-  database, a browser environment or a real network are skipped, and the agent
-  has no way to add dependencies. This is where per-stack coverage plateaus;
-  see "Example run" for the measured ceiling.
-- Diff coverage is not computed.
-- The TypeScript quality checks are lexical heuristics, not a full parser.
-- Coverage deltas depend on the full suite, so pre-existing flaky app tests can
-  affect them.
-
-## What was cut, in order
-
-1. Diff-coverage (not implemented).
-2. Multiple backfill runs with a hard cumulative ceiling (single run instead).
-3. Extra comment states beyond the six implemented.
-4. Fail-on-base polish (no automatic flip of a test's status into a revert).
-
-Flakiness rerun is implemented: the accepted tests run twice and a second-run
-failure reverts the stack.
+- **The default provider is a third party.** Diffs and file contents leave
+  your infrastructure for DeepSeek's API. Use an approved provider whose
+  retention terms fit your data, never send secrets or non-shareable code, and
+  prefer the opt-in Anthropic path if that is the approved vendor.
+- Forks are skipped; there is no fork execution path. Model output is
+  non-deterministic, so the gate, not the model, is the contract.
+- DeepSeek prices differ between peak and off-peak hours; costs use peak
+  rates, so the figure is an upper bound.
+- Backfill selects at most `3 × max_batches` modules in one run with a single
+  $5 ceiling; nine targets exhausted the 30-turn budget, so the budget is now
+  45 and batches stay at six.
+- Backfill cannot exercise code that needs a database, a browser or real
+  network access, and cannot add dependencies: that is where coverage
+  plateaus.
+- TypeScript checks are lexical heuristics; coverage deltas depend on the full
+  suite, so flaky app tests can affect them.
 
 ## Production changes
 
 - A GitHub App instead of `GITHUB_TOKEN`, so commits can trigger workflows.
 - Ephemeral runners or gVisor/Firecracker for stronger isolation.
+- An approved model provider with explicit retention terms, plus a policy that
+  keeps secrets and non-shareable code out of the diff sent to it.
 - Real mutation testing instead of the AST heuristics.
 - A cost dashboard and per-repository budgets.
 - A golden-PR evaluation suite to measure the agent before changing prompts.
 - Org policy and required CODEOWNERS reviews on tooling paths.
 
-## Suppressions
+## Further detail
 
-- None in `agent/`, `verifier/`, `publisher/` (no `# noqa`, `# nosec` or
-  `eslint-disable`).
-- `ai_test_agent/sandbox/Dockerfile`: `# hadolint ignore=DL3013` — pip
-  versions come from the application's trusted requirements file.
-- Test fixtures that intentionally contain fake credentials are marked
-  `# pragma: allowlist secret` so the secret scanner does not flag them.
-- `frontend/coverage/**` contains generated files with `eslint-disable`; the
-  directory is git-ignored.
-
-## Local verification performed
-
-The full pipeline was exercised end to end on a scratch clone with a
-hand-written candidate test (not agent output): verifier accepted the backend
-stack, the differential check reported `passed on both`, and the publisher
-rendered the comment from the real report. That scratch run is only a smoke
-test; every number in "Example run" comes from the workflow runs linked there.
+`docs/engineering-notes.md` holds the security checklist, the defects the live
+runs exposed with their fixes and regression tests, what was cut, the
+suppressions and the local verification. `docs/evidence/` keeps one real run's
+report and trimmed trace.
