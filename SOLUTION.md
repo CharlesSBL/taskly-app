@@ -136,7 +136,8 @@ The live runs also exposed four real defects that are fixed in `main`: test
 paths passed to the sandbox were not stack-relative, the publisher resolved a
 relative patch path after `git -C`, the verifier was suppressed by a skipped
 job dependency, and DeepSeek occasionally truncated a response at the 4k token
-cap. The fixes are the commits immediately before the backfill merge.
+cap. The fixes are the `fix(...)` and `ci:` commits around the backfill merge
+in the history.
 
 ## Security checklist
 
