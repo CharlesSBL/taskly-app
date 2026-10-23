@@ -53,6 +53,13 @@ jobs:
       - name: shellcheck
         run: find sandbox -name '*.sh' -print0 | xargs -0 -r shellcheck
 
+      - name: hadolint
+        run: |
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/repo" -w /repo \
+            hadolint/hadolint:v2.15.1@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d \
+            hadolint ai_test_agent/sandbox/Dockerfile
+
       - name: actionlint
         run: |
           docker run --rm \
@@ -115,3 +122,23 @@ jobs:
       - name: Frontend tests with coverage
         working-directory: frontend
         run: npm run test:coverage
+
+  sandbox:
+    name: Sandbox smoke test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build sandbox image
+        run: docker build -t taskly-sandbox:local -f ai_test_agent/sandbox/Dockerfile .
+
+      - name: Backend tests in the sandbox
+        run: ai_test_agent/sandbox/run.sh --stack backend --repo . --out /tmp/be
+
+      - name: Frontend tests in the sandbox
+        run: ai_test_agent/sandbox/run.sh --stack frontend --repo . --out /tmp/fe
