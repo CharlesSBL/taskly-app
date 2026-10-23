@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 
+import pytest
+
 from publisher.commit import (
     apply_verified_patch,
     is_allowed_path,
@@ -200,3 +202,25 @@ def test_helpers() -> None:
     assert not is_allowed_path("../evil.py")
     assert not is_allowed_path("ai_test_agent/selftests/test_x.py")
     assert not is_allowed_path("frontend/src/lib/http.test.js")
+
+
+def test_relative_patch_path_is_resolved_before_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Regression: git -C resolves a relative patch path against the repo.
+    write_patch(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    runner = ScriptedRunner({"apply --numstat": RunResult(0, f"1\t0\t{PATH}\n")})
+
+    outcome = apply_verified_patch(
+        runner,
+        repo=tmp_path,
+        patch_path=Path("verified_tests.patch"),
+        expected_sha=patch_sha256(PATCH),
+        branch="b",
+        message="m",
+    )
+
+    assert outcome.ok, outcome.message
+    joined = [" ".join(call) for call in runner.calls]
+    assert any(str(tmp_path / "verified_tests.patch") in call for call in joined)

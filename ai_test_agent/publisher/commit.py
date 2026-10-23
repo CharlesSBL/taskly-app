@@ -73,6 +73,9 @@ def apply_verified_patch(
     branch: str,
     message: str,
 ) -> Outcome:
+    # git -C changes directory, so a relative patch path would be resolved
+    # against the repository instead of the caller's working directory.
+    patch_path = patch_path.resolve()
     if not patch_path.is_file():
         return Outcome(False, f"patch not found: {patch_path}")
     patch = patch_path.read_text(encoding="utf-8")

@@ -89,8 +89,8 @@ def main(argv: list[str] | None = None, *, runner: Runner | None = None) -> int:
     if args.command == "commit":
         outcome = apply_verified_patch(
             active,
-            repo=args.repo_dir,
-            patch_path=args.patch,
+            repo=args.repo_dir.resolve(),
+            patch_path=args.patch.resolve(),
             expected_sha=args.sha,
             branch=args.branch,
             message=args.message,
@@ -101,11 +101,11 @@ def main(argv: list[str] | None = None, *, runner: Runner | None = None) -> int:
     outcome = open_backfill_pr(
         active,
         repo=args.repo,
-        repo_dir=args.repo_dir,
+        repo_dir=args.repo_dir.resolve(),
         branch=args.branch,
         base_branch=args.base_branch,
         title=args.title,
-        body_path=args.body,
+        body_path=args.body.resolve(),
     )
     print(outcome.message, file=sys.stdout if outcome.ok else sys.stderr)
     return 0 if outcome.ok else 1
