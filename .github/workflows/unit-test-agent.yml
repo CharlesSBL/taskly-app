@@ -11,42 +11,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  explain-skip:
-    name: Explain why the agent is skipped
-    if: >-
-      github.event.action != 'labeled' &&
-      (github.event.pull_request.head.repo.full_name != github.repository ||
-       github.event.pull_request.user.type == 'Bot' ||
-       github.event.sender.type == 'Bot')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Write summary
-        env:
-          IS_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
-          IS_BOT: ${{ github.event.sender.type == 'Bot' }}
-        run: |
-          {
-            echo "## AI unit-test agent skipped"
-            echo ""
-            if [ "$IS_FORK" = "true" ]; then
-              echo "This pull request comes from a fork; secrets are not available to it."
-            fi
-            if [ "$IS_BOT" = "true" ]; then
-              echo "This push was made by a bot, so the agent does not run again."
-            fi
-            if [ "$IS_FORK" != "true" ] && [ "$IS_BOT" != "true" ]; then
-              echo "Dependabot pull requests are not analyzed by the agent."
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
-
   agent-run:
     name: Agent (trusted tooling, untrusted PR)
-    needs: [explain-skip]
     if: >-
-      always() && needs['explain-skip'].result == 'skipped' &&
       github.event.action != 'labeled' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.type != 'Bot' &&
       github.event.sender.type != 'Bot'
     runs-on: ubuntu-latest
     timeout-minutes: 30
