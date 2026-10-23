@@ -114,15 +114,18 @@ def write_test_file(ctx: ToolContext, arguments: dict[str, Any]) -> str:
     raw_path = _require_str(arguments, "path")
     content = _require_str(arguments, "content")
     relative = ctx.policy.check_test_write(raw_path, content)
-    if relative.as_posix() in ctx.written:
-        raise PathRejected(f"already written in this run: {relative.as_posix()}")
+    name = relative.as_posix()
 
-    ctx.guard.record_file()
+    # Rewriting a file is how the agent fixes a failing test it just wrote, so
+    # an overwrite is allowed. Only the first write of a path costs budget.
+    if name not in ctx.written:
+        ctx.guard.record_file()
+        ctx.written.append(name)
+
     destination = ctx.repo_root / relative
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(content, encoding="utf-8")
-    ctx.written.append(relative.as_posix())
-    return f"wrote {relative.as_posix()} ({len(content.encode('utf-8'))} bytes)"
+    return f"wrote {name} ({len(content.encode('utf-8'))} bytes)"
 
 
 def _run(ctx: ToolContext, stack: Stack, arguments: dict[str, Any], *, coverage: bool) -> str:

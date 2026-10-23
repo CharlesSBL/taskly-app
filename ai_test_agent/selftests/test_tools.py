@@ -82,6 +82,22 @@ def test_write_backend_test_is_allowed(context: ToolContext) -> None:
     assert context.guard.files_written == 1
 
 
+def test_write_can_rewrite_the_same_file_without_charging_the_budget(
+    context: ToolContext,
+) -> None:
+    """Regression: a wrong first draft could not be fixed in the same run."""
+    path = "backend/tests/features/todos/test_math.py"
+    first = execute(
+        context, "write_test_file", {"path": path, "content": "def test_a():\n    assert 0\n"}
+    )
+    fixed = "def test_a():\n    assert 1 + 1 == 2\n"
+    second = execute(context, "write_test_file", {"path": path, "content": fixed})
+    assert first.startswith("wrote") and second.startswith("wrote")
+    assert (context.repo_root / path).read_text() == fixed
+    assert context.written == [path]
+    assert context.guard.files_written == 1
+
+
 def test_write_rejects_a_backend_line_longer_than_the_lint_limit(
     context: ToolContext,
 ) -> None:
@@ -161,12 +177,6 @@ def test_write_rejects_oversized_content(context: ToolContext) -> None:
         {"path": "backend/tests/test_big.py", "content": "x" * (64 * 1024 + 1)},
     )
     assert "exceeds" in result
-
-
-def test_duplicate_write_is_rejected(context: ToolContext) -> None:
-    args = {"path": "backend/tests/test_once.py", "content": "def test_x(): pass\n"}
-    assert execute(context, "write_test_file", args).startswith("wrote")
-    assert execute(context, "write_test_file", args).startswith("ERROR:")
 
 
 def test_write_respects_file_budget(tmp_path: Path) -> None:
