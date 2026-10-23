@@ -7,7 +7,9 @@ failure is recorded with a reason and surfaced in the pull request comment.
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
+import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,11 +26,21 @@ STACKS: tuple[Stack, ...] = ("backend", "frontend")
 TESTS_PASSED = re.compile(r"(\d+) passed")
 
 
+def ruff_binary() -> str:
+    found = shutil.which("ruff")
+    if found:
+        return found
+    # The tooling venv's scripts directory is the reliable fallback when the
+    # verifier is started as `.venv/bin/python -m verifier`.
+    candidate = Path(sys.executable).with_name("ruff")
+    return str(candidate) if candidate.exists() else "ruff"
+
+
 def ruff_lint(pr_dir: Path, files: Sequence[str]) -> CommandResult:
     try:
         completed = subprocess.run(
             [
-                "ruff",
+                ruff_binary(),
                 "check",
                 "--isolated",
                 "--select",
