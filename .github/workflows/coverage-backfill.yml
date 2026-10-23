@@ -1,0 +1,352 @@
+name: Coverage backfill
+
+on:
+  workflow_dispatch:
+    inputs:
+      stack:
+        description: Stack to backfill
+        type: choice
+        options: [both, backend, frontend]
+        default: both
+      max_batches:
+        description: Number of 3-file batches (cost ceiling is $5)
+        type: choice
+        options: ["1", "2", "3"]
+        default: "1"
+
+permissions: {}
+
+concurrency:
+  group: coverage-backfill
+  cancel-in-progress: false
+
+jobs:
+  agent-run:
+    name: Backfill agent (trusted checkout)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      targets: ${{ steps.targets.outputs.targets }}
+    env:
+      STACK: ${{ inputs.stack }}
+      MAX_BATCHES: ${{ inputs.max_batches }}
+    steps:
+      - name: Check out the default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: trusted
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: trusted/ai_test_agent/requirements.lock
+
+      - name: Install tooling (hashed lock, no API key)
+        working-directory: trusted/ai_test_agent
+        run: pip install --require-hashes -r requirements.lock
+
+      - name: Build the sandbox
+        run: |
+          docker build \
+            -t taskly-sandbox:local \
+            -f trusted/ai_test_agent/sandbox/Dockerfile \
+            trusted
+
+      - name: Measure the baseline with coverage (no API key)
+        run: |
+          mkdir -p baseline artifacts work
+          set +e
+          trusted/ai_test_agent/sandbox/run.sh \
+            --stack backend --repo trusted --out baseline/backend --mode coverage \
+            > baseline/backend.log 2>&1
+          backend_exit=$?
+          trusted/ai_test_agent/sandbox/run.sh \
+            --stack frontend --repo trusted --out baseline/frontend --mode coverage \
+            > baseline/frontend.log 2>&1
+          frontend_exit=$?
+          BASELINE_BACKEND_EXIT=$backend_exit BASELINE_FRONTEND_EXIT=$frontend_exit \
+            python - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+
+          def report(stack: str, exit_code: int) -> dict[str, object]:
+              text = (Path("baseline") / f"{stack}.log").read_text(errors="replace")
+              text = re.sub(r"\x1b\[[0-9;]*m", "", text)
+              match = re.search(r"Tests\s+(\d+) passed", text) or re.search(r"(\d+) passed", text)
+              coverage = None
+              if stack == "backend":
+                  path = Path("baseline/backend/be_coverage.json")
+                  if path.is_file():
+                      coverage = json.loads(path.read_text())["totals"]["percent_covered"]
+              else:
+                  path = Path("baseline/frontend/fe_coverage/coverage-summary.json")
+                  if path.is_file():
+                      coverage = json.loads(path.read_text())["total"]["lines"]["pct"]
+              return {
+                  "status": "passed" if exit_code == 0 else "failed",
+                  "tests": int(match.group(1)) if match else None,
+                  "coverage": round(float(coverage), 2) if coverage is not None else None,
+              }
+
+
+          payload = {
+              "backend": report("backend", int(os.environ["BASELINE_BACKEND_EXIT"])),
+              "frontend": report("frontend", int(os.environ["BASELINE_FRONTEND_EXIT"])),
+          }
+          Path("baseline/baseline.json").write_text(json.dumps(payload, indent=2) + "\n")
+          PY
+
+      - name: Select the lowest-coverage modules
+        id: targets
+        run: |
+          limit=$((MAX_BATCHES * 3))
+          PYTHONPATH=trusted/ai_test_agent python -m verifier.backfill_targets \
+            --stack "$STACK" \
+            --backend-coverage baseline/backend/be_coverage.json \
+            --frontend-coverage baseline/frontend/fe_coverage/coverage-summary.json \
+            --limit "$limit" \
+            --out work/targets.txt
+          targets=$(paste -sd, work/targets.txt)
+          echo "targets=$targets" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Coverage backfill"
+            echo ""
+            if [ -z "$targets" ]; then
+              echo "No modules were selected; check the baseline."
+            else
+              echo "Targets: $targets"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create the working copy
+        if: steps.targets.outputs.targets != ''
+        run: |
+          cp -a trusted work/repo
+          : > work/empty.diff
+
+      - name: Run the agent (API key only in this step)
+        if: steps.targets.outputs.targets != ''
+        working-directory: trusted/ai_test_agent
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TARGETS: ${{ steps.targets.outputs.targets }}
+        run: |
+          python -m agent \
+            --mode backfill \
+            --repo ../../work/repo \
+            --diff ../../work/empty.diff \
+            --out ../../artifacts \
+            --skills-dir ../.claude/skills \
+            --agent-definition ../.claude/agents/unit-test-agent.md \
+            --sandbox-script sandbox/run.sh \
+            --backfill-files "$TARGETS" \
+            --baseline-json ../../baseline/baseline.json
+
+      - name: Upload untrusted agent output
+        if: steps.targets.outputs.targets != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: untrusted-backfill-output-${{ github.run_id }}
+          path: |
+            artifacts/agent_manifest.json
+            artifacts/agent_trace.json
+            artifacts/candidate_tests.patch
+            baseline/baseline.json
+          if-no-files-found: error
+          retention-days: 7
+
+  verify-gate:
+    name: Verify backfill (no secrets)
+    needs: [agent-run]
+    if: needs.agent-run.result == 'success' && needs.agent-run.outputs.targets != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      accepted_stacks: ${{ steps.gate.outputs.accepted_stacks }}
+      patch_sha256: ${{ steps.gate.outputs.patch_sha256 }}
+    env:
+      BASE_SHA: ${{ github.sha }}
+    steps:
+      - name: Check out the default branch (trusted)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: trusted
+          persist-credentials: false
+
+      - name: Check out the default branch (patch target)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: pr
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: trusted/ai_test_agent/requirements.lock
+
+      - name: Install tooling (hashed lock, no API key)
+        working-directory: trusted/ai_test_agent
+        run: pip install --require-hashes -r requirements.lock
+
+      - name: Build the sandbox
+        run: |
+          docker build \
+            -t taskly-sandbox:local \
+            -f trusted/ai_test_agent/sandbox/Dockerfile \
+            trusted
+
+      - name: Download untrusted agent output
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: untrusted-backfill-output-${{ github.run_id }}
+          path: artifacts
+
+      - name: Run the verification gate
+        working-directory: trusted/ai_test_agent
+        run: |
+          python -m verifier \
+            --verify-only \
+            --pr-dir ../../pr \
+            --trusted-dir .. \
+            --base-sha "$BASE_SHA" \
+            --manifest ../../artifacts/agent_manifest.json \
+            --patch ../../artifacts/candidate_tests.patch \
+            --out ../../verified
+
+      - name: Render the report
+        working-directory: trusted/ai_test_agent
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python -m publisher comment \
+            --manifest ../../artifacts/agent_manifest.json \
+            --report ../../verified/verification_report.json \
+            --out ../../verified/pr_report.md \
+            --run-url "$RUN_URL"
+
+      - name: Expose gate outputs
+        id: gate
+        run: |
+          {
+            echo "accepted_stacks=$(jq -r '.accepted_stacks | join(",")' verified/verification_report.json)"
+            echo "patch_sha256=$(jq -r .patch_sha256 verified/verification_report.json)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload verified output
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verified-backfill-output-${{ github.run_id }}
+          path: |
+            verified/verified_tests.patch
+            verified/verification_report.json
+            verified/pr_report.md
+            artifacts/agent_manifest.json
+            artifacts/agent_trace.json
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-backfill:
+    name: Open or update the backfill PR
+    needs: [agent-run, verify-gate]
+    if: needs.verify-gate.result == 'success' && needs.verify-gate.outputs.accepted_stacks != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      REPO: ${{ github.repository }}
+      SENDER: ${{ github.actor }}
+      BRANCH: chore/ai-backfill-unit-tests
+      BASE_BRANCH: ${{ github.event.repository.default_branch }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out the trusted default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: trusted
+          persist-credentials: false
+
+      - name: Check out the branch to update
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: pr
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Install the trusted publisher (hashed lock)
+        run: pip install --require-hashes -r trusted/ai_test_agent/requirements.lock
+
+      - name: Authorize the dispatcher
+        working-directory: trusted/ai_test_agent
+        run: python -m publisher authorize --repo "$REPO" --login "$SENDER"
+
+      - name: Configure the git remote with the job token
+        run: |
+          git -C pr remote set-url origin \
+            "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+
+      - name: Continue from the existing backfill branch when present
+        run: |
+          if git -C pr ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            git -C pr fetch origin "$BRANCH"
+            git -C pr checkout -B "$BRANCH" FETCH_HEAD
+          fi
+
+      - name: Download the verified artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: verified-backfill-output-${{ github.run_id }}
+          path: verified
+
+      - name: Commit the verified tests
+        working-directory: trusted/ai_test_agent
+        run: |
+          sha=$(jq -r .patch_sha256 ../../verified/verification_report.json)
+          python -m publisher commit \
+            --repo-dir ../../pr \
+            --patch ../../verified/verified_tests.patch \
+            --sha "$sha" \
+            --branch "$BRANCH" \
+            --message "test: backfill unit tests generated by the AI agent"
+
+      - name: Build the PR body
+        run: |
+          {
+            echo "## Coverage backfill"
+            echo ""
+            echo "Generated by the \`coverage-backfill\` workflow; every test passed the same gate as a pull request."
+            echo ""
+            jq -r '.coverage | to_entries[] | "- \(.key): \(.value.before)% → \(.value.after)% (\(.value.delta)%)"' \
+              verified/verification_report.json
+            echo ""
+            cat verified/pr_report.md
+          } > verified/pr_body.md
+
+      - name: Open or update the PR
+        working-directory: trusted/ai_test_agent
+        run: |
+          python -m publisher backfill \
+            --repo "$REPO" \
+            --repo-dir ../../pr \
+            --branch "$BRANCH" \
+            --base-branch "$BASE_BRANCH" \
+            --title "chore: backfill unit tests generated by the AI agent" \
+            --body ../../verified/pr_body.md
