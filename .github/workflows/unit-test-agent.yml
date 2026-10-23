@@ -254,7 +254,10 @@ jobs:
   verify-gate:
     name: Verify (trusted tooling, no secrets)
     needs: [agent-run]
-    if: needs.agent-run.result == 'success' && needs.agent-run.outputs.stacks != ''
+    # The agent job only survives when the pre-filter found stacks, and the
+    # verifier handles an empty decision list as nothing_to_test. Relying on
+    # the job output here skipped the gate after a successful agent run.
+    if: needs.agent-run.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
