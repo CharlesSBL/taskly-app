@@ -74,6 +74,10 @@ in the test module.
 `monkeypatch.setenv` (or delete them with `monkeypatch.delenv`) because the
 sandbox runs with `env -i`. Never depend on the ambient environment.
 
+URL-shaped fixtures such as `postgresql+psycopg://user:pass@host/db` trip the
+repository's secret scanner even though they are fake. Append
+`# pragma: allowlist secret` to those lines, as the existing tests do.
+
 ## Verify
 
 Run the new tests through the sandbox tool before finishing:
