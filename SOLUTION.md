@@ -46,6 +46,7 @@ flowchart LR
 | Decision | Rationale | Trade-off |
 | --- | --- | --- |
 | Custom tool-use loop on the official `anthropic` SDK | Every API call, tool call and token count is auditable; no framework hides the control flow | We own retries and message plumbing |
+| Provider abstraction: Anthropic and DeepSeek | DeepSeek exposes an Anthropic-compatible Messages API, so the same SDK, tools and loop work unchanged; the key, base URL, default model and price table are selected in one place | A second price table to maintain, and DeepSeek peak rates are used for budgets |
 | Direct SDK instead of LangGraph or similar | Fewer dependencies, clearer security boundary, nothing to keep in sync with the model API | No framework features (persistence, graph visualization) |
 | All tooling runs from the trusted base checkout | The PR cannot change the code that holds the key or makes decisions | Tooling changes need their own PR before a demo PR |
 | Patch posted by default, commit opt-in via label | The patch is reviewable and a human decides what lands | A second action is required to commit |
@@ -78,7 +79,9 @@ Local run (same gate):
 cd ai_test_agent
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.lock
-ANTHROPIC_API_KEY=... .venv/bin/python -m agent --mode pr \
+export TASKLY_AGENT_PROVIDER=deepseek   # or anthropic, the default
+export DEEPSEEK_API_KEY=...             # ANTHROPIC_API_KEY for Anthropic
+.venv/bin/python -m agent --mode pr \
   --repo ../pr --diff ../pr.diff --out ../artifacts \
   --skills-dir ../.claude/skills \
   --agent-definition ../.claude/agents/unit-test-agent.md \
@@ -108,7 +111,7 @@ activation in the trace.
 | --- | --- |
 | Trusted checkout for key-holding and gate code | Jobs 1–3 checkout the base SHA into `trusted/`; the head is a separate `pr/` tree |
 | Least privilege | `permissions: {}` at workflow level; per-job read; commit job only has `contents: write` |
-| API key only in the agent step | `env:` on that single step; verifier/publisher jobs have no secrets |
+| API keys only in the agent step | `env:` on that single step; verifier/publisher jobs have no secrets; the provider key is read from config |
 | `pull_request`, not `pull_request_target` | Workflow trigger; forks are skipped with a step summary |
 | Untrusted diff/files and model output | `<untrusted_source_data>` wrapping, escaped closing tag, strict schemas, independent verifier allowlists |
 | Lockfile changes | Dependencies always come from the base revision's lock files; the report warns when the PR changed them |
@@ -129,9 +132,10 @@ activation in the trace.
 - The base revision is a git checkout with the PR's base commit available.
 - The repository uses `main` by default.
 - Backend tests run with `cwd=backend`; frontend tests with `cwd=frontend`.
-- The agent's model is `claude-sonnet-5-5` (configurable via
-  `TASKLY_AGENT_MODEL`); prices were verified against the Anthropic pricing
-  page on 2026-10-23.
+- The provider is `anthropic` by default; this repository is configured with
+  `AGENT_PROVIDER=deepseek` and `AGENT_MODEL=deepseek-flash` for testing.
+  Prices for both providers were verified on 2026-10-23; DeepSeek budgets use
+  the higher peak-hour rates.
 - The app's lock file is not hash-pinned, so the sandbox uses binary wheels
   only; the tooling's own lock file is hash-pinned.
 
@@ -148,6 +152,8 @@ activation in the trace.
   will not re-run on the commit created by the label path. That is why commit
   is opt-in and the patch is the default.
 - Model output is non-deterministic; the gate is the stable contract.
+- DeepSeek prices differ between peak and off-peak hours; costs are estimated
+  at peak rates, so the reported figure is an upper bound outside peak hours.
 - Backfill selects at most `3 × max_batches` modules in one agent run with a
   single $5 ceiling, rather than several independent runs.
 - Diff coverage is not computed.

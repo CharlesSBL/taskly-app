@@ -137,7 +137,7 @@ def test_happy_path_writes_artifacts(
             ),
         ]
     )
-    monkeypatch.setattr("agent.cli.anthropic.Anthropic", lambda: client)
+    monkeypatch.setattr("agent.cli.anthropic.Anthropic", lambda **_kwargs: client)
 
     baseline = tmp_path / "baseline.json"
     baseline.write_text(json.dumps({"backend": {"status": "passed", "tests": 21, "coverage": 42}}))
@@ -171,7 +171,7 @@ def test_model_mismatch_is_rejected(
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     repo, definition, skills = make_workspace(tmp_path, model="claude-opus-5-5")
     client = FakeClient([])
-    monkeypatch.setattr("agent.cli.anthropic.Anthropic", lambda: client)
+    monkeypatch.setattr("agent.cli.anthropic.Anthropic", lambda **_kwargs: client)
     assert main(base_args(tmp_path, repo, definition, skills)) == 2
     assert "pins 'claude-opus-5-5'" in capsys.readouterr().err
 
@@ -180,7 +180,49 @@ def test_incomplete_run_returns_one(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     repo, definition, skills = make_workspace(tmp_path)
     client = FakeClient([message(SimpleNamespace(type="text", text="done"))])
-    monkeypatch.setattr("agent.cli.anthropic.Anthropic", lambda: client)
+    monkeypatch.setattr("agent.cli.anthropic.Anthropic", lambda **_kwargs: client)
     assert main(base_args(tmp_path, repo, definition, skills)) == 1
     manifest = load_manifest(tmp_path / "out" / "agent_manifest.json")
     assert manifest.status == "error"
+
+
+def test_deepseek_provider_uses_the_anthropic_compatible_endpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TASKLY_AGENT_PROVIDER", "deepseek")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "dsk-test-key")  # pragma: allowlist secret
+    repo, definition, skills = make_workspace(tmp_path)
+    client = FakeClient(
+        [
+            message(
+                tool_block(
+                    "finish",
+                    {"decisions": [{"file": "README.md", "action": "skip", "rationale": "docs"}]},
+                )
+            )
+        ]
+    )
+    captured: dict[str, Any] = {}
+
+    def fake_anthropic(**kwargs: Any) -> FakeClient:
+        captured.update(kwargs)
+        return client
+
+    monkeypatch.setattr("agent.cli.anthropic.Anthropic", fake_anthropic)
+
+    assert main(base_args(tmp_path, repo, definition, skills)) == 0
+    assert captured["base_url"] == "https://api.deepseek.com/anthropic"
+    assert captured["api_key"] == "dsk-test-key"  # pragma: allowlist secret
+    manifest = load_manifest(tmp_path / "out" / "agent_manifest.json")
+    assert manifest.model == "deepseek-flash"
+
+
+def test_deepseek_missing_key_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("TASKLY_AGENT_PROVIDER", "deepseek")
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    repo, definition, skills = make_workspace(tmp_path)
+    assert main(base_args(tmp_path, repo, definition, skills)) == 2
+    assert "DEEPSEEK_API_KEY is not set" in capsys.readouterr().err

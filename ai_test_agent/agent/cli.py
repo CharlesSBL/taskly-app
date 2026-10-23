@@ -64,11 +64,17 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        print("ANTHROPIC_API_KEY is not set", file=sys.stderr)
+    try:
+        settings = Settings.from_env(args.mode)
+    except ConfigError as exc:
+        print(f"configuration error: {exc}", file=sys.stderr)
         return 2
 
-    settings = Settings.from_env(args.mode)
+    api_key = os.environ.get(settings.api_key_env, "")
+    if not api_key:
+        print(f"{settings.api_key_env} is not set", file=sys.stderr)
+        return 2
+
     skills_dir = args.skills_dir or (PACKAGE_ROOT.parent / ".claude" / "skills")
     agent_path = args.agent_definition or (skills_dir.parent / "agents" / "unit-test-agent.md")
     sandbox_script = args.sandbox_script or (PACKAGE_ROOT / "sandbox" / "run.sh")
@@ -90,9 +96,14 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     args.out.mkdir(parents=True, exist_ok=True)
+    client = (
+        anthropic.Anthropic(api_key=api_key, base_url=settings.base_url)
+        if settings.base_url
+        else anthropic.Anthropic(api_key=api_key)
+    )
     runtime = AgentRuntime(
         settings=settings,
-        client=cast(AnthropicClient, anthropic.Anthropic()),
+        client=cast(AnthropicClient, client),
         definition=definition,
         skills=skills,
         repo_root=args.repo.resolve(),

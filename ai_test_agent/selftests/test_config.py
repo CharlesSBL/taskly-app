@@ -52,3 +52,44 @@ def test_price_is_immutable() -> None:
     )
     with pytest.raises(AttributeError):
         price.input = Decimal(9)  # type: ignore[misc]
+
+
+def test_deepseek_provider_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TASKLY_AGENT_PROVIDER", "deepseek")
+    monkeypatch.delenv("TASKLY_AGENT_MODEL", raising=False)
+    settings = Settings.from_env()
+    assert settings.model == "deepseek-flash"
+    assert settings.base_url == "https://api.deepseek.com/anthropic"
+    assert settings.api_key_env == "DEEPSEEK_API_KEY"  # pragma: allowlist secret
+    assert settings.price.input == Decimal("0.30")
+    assert settings.price.output == Decimal("1.20")
+
+
+def test_deepseek_model_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TASKLY_AGENT_PROVIDER", "deepseek")
+    monkeypatch.setenv("TASKLY_AGENT_MODEL", "deepseek-v4-pro")
+    settings = Settings.from_env("backfill")
+    assert settings.model == "deepseek-v4-pro"
+    assert settings.price.input == Decimal("1.32")
+    assert settings.budgets.max_cost_usd == Decimal("5.00")
+
+
+def test_provider_is_case_insensitive_and_empty_model_is_ignored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TASKLY_AGENT_PROVIDER", " DeepSeek ")
+    monkeypatch.setenv("TASKLY_AGENT_MODEL", "  ")
+    assert Settings.from_env().model == "deepseek-flash"
+
+
+def test_unknown_provider_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TASKLY_AGENT_PROVIDER", "openai")
+    with pytest.raises(ConfigError, match="unknown provider"):
+        Settings.from_env()
+
+
+def test_model_must_belong_to_the_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TASKLY_AGENT_PROVIDER", "deepseek")
+    monkeypatch.setenv("TASKLY_AGENT_MODEL", "claude-sonnet-5-5")
+    with pytest.raises(ConfigError, match="for provider 'deepseek'"):
+        Settings.from_env()

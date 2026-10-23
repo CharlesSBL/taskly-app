@@ -13,12 +13,19 @@ sandbox escape.
 
 ## Secrets
 
-- The only secret is `ANTHROPIC_API_KEY`, stored as a GitHub Actions secret.
-- It is injected into exactly one step: the agent run in
+- Supported providers are `anthropic` (default) and `deepseek`, each with its
+  own GitHub Actions secret (`ANTHROPIC_API_KEY` / `DEEPSEEK_API_KEY`).
+- The repository variable `AGENT_PROVIDER` selects the provider and
+  `AGENT_MODEL` optionally overrides the model. This repository is currently
+  set to `deepseek` / `deepseek-flash` for testing.
+- Keys are injected into exactly one step: the agent run in
   `unit-test-agent.yml` / `coverage-backfill.yml`.
 - The verifier and publisher jobs run with no secrets.
+- DeepSeek is called through its Anthropic-compatible endpoint with the same
+  official SDK; it receives the same tool definitions and data policy.
 - Traces are redacted before they are written; the redaction patterns cover
-  Anthropic, GitHub, AWS and generic bearer/key-value credentials.
+  Anthropic, DeepSeek (`sk-...`), GitHub, AWS and generic bearer/key-value
+  credentials.
 - Never put a key in `.env` and commit it. `.env` is ignored; `.env.example`
   contains only local database defaults.
 
