@@ -67,6 +67,30 @@ def test_happy_path_applies_commits_and_pushes(tmp_path: Path) -> None:
     assert any("push origin HEAD:refs/heads/ai-tests/demo" in call for call in joined)
 
 
+def test_force_push_uses_a_lease_on_the_bot_branch(tmp_path: Path) -> None:
+    """Regression: a stale backfill branch left the verified patch unappliable."""
+    patch_path = write_patch(tmp_path)
+    runner = ScriptedRunner({"apply --numstat": RunResult(0, f"1\t0\t{PATH}\n")})
+
+    outcome = apply_verified_patch(
+        runner,
+        repo=tmp_path,
+        patch_path=patch_path,
+        expected_sha=patch_sha256(PATCH),
+        branch="chore/backfill",
+        message="test: backfill",
+        force=True,
+    )
+
+    assert outcome.ok, outcome.message
+    joined = [" ".join(call) for call in runner.calls]
+    assert any(
+        "push --force-with-lease=refs/heads/chore/backfill origin HEAD:refs/heads/chore/backfill"
+        in call
+        for call in joined
+    )
+
+
 def test_sha_mismatch_fails_before_running_anything(tmp_path: Path) -> None:
     runner = ScriptedRunner()
     outcome = apply_verified_patch(

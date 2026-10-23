@@ -1,0 +1,34 @@
+{
+  "status": "passed",
+  "accepted_stacks": [
+    "backend",
+    "frontend"
+  ],
+  "reverted_stacks": {},
+  "coverage": {
+    "backend": {
+      "before": 47.88,
+      "after": 51.69,
+      "delta": 3.81,
+      "tests": 20,
+      "flaky": false
+    },
+    "frontend": {
+      "before": 49.0,
+      "after": 51.57,
+      "delta": 2.57,
+      "tests": 4,
+      "flaky": false
+    }
+  },
+  "differential": {
+    "backend/tests/features/todos/test_due.py": "n/a",
+    "backend/tests/features/todos/test_router.py": "true",
+    "frontend/src/features/todos/TodosPage.test.tsx": "true",
+    "frontend/src/features/todos/api/todos.test.ts": "true",
+    "frontend/src/features/todos/components/TodosHeader.test.tsx": "true",
+    "frontend/src/features/todos/utils/due.test.ts": "n/a"
+  },
+  "patch_sha256": "fcffddf68c5679e42a0d6f48079efab6b07863842b1ccc4330ba806f62beb667",
+  "notes": []
+}

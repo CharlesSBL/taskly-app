@@ -52,6 +52,7 @@ def build_parser() -> argparse.ArgumentParser:
     commit.add_argument("--sha", required=True)
     commit.add_argument("--branch", required=True)
     commit.add_argument("--message", required=True)
+    commit.add_argument("--force", action="store_true")
 
     backfill = subparsers.add_parser("backfill", help="open or update the backfill PR")
     backfill.add_argument("--repo", required=True)
@@ -94,6 +95,7 @@ def main(argv: list[str] | None = None, *, runner: Runner | None = None) -> int:
             expected_sha=args.sha,
             branch=args.branch,
             message=args.message,
+            force=args.force,
         )
         print(outcome.message, file=sys.stdout if outcome.ok else sys.stderr)
         return 0 if outcome.ok else 1

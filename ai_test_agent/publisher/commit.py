@@ -72,6 +72,7 @@ def apply_verified_patch(
     expected_sha: str,
     branch: str,
     message: str,
+    force: bool = False,
 ) -> Outcome:
     # git -C changes directory, so a relative patch path would be resolved
     # against the repository instead of the caller's working directory.
@@ -132,7 +133,12 @@ def apply_verified_patch(
     if not committed.succeeded:
         return Outcome(False, f"git commit failed: {committed.stderr.strip()[:500]}")
 
-    pushed = runner.run(["git", "-C", str(repo), "push", "origin", f"HEAD:refs/heads/{branch}"])
+    push = ["git", "-C", str(repo), "push"]
+    if force:
+        # The backfill starts from the default branch, so an existing bot branch
+        # is intentionally replaced. The lease keeps a third party's update safe.
+        push.append(f"--force-with-lease=refs/heads/{branch}")
+    pushed = runner.run([*push, "origin", f"HEAD:refs/heads/{branch}"])
     if not pushed.succeeded:
         return Outcome(False, f"git push failed: {pushed.stderr.strip()[:500]}")
 
