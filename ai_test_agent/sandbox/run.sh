@@ -151,6 +151,11 @@ if [ "$stack" = "backend" ]; then
 else
     if [ "$mode" = "typecheck" ]; then
         run_container npx tsc --noEmit
+        if [ "$#" -gt 0 ]; then
+            run_container npx prettier --check "$@"
+        else
+            run_container npx prettier --check src
+        fi
     elif [ "$mode" = "coverage" ]; then
         run_container npx vitest run \
             --coverage \

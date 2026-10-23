@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from lint_policy import run_ruff
+
 from ..budget import BudgetExceeded, BudgetGuard
 from ..manifest import Baseline, Decision, Stack
 from ..skills import SkillError, SkillLibrary
@@ -22,6 +24,7 @@ from .paths import MAX_READ_BYTES, PathPolicy, PathRejected, is_tooling_path
 from .untrusted import wrap_untrusted
 
 MAX_LIST_RESULTS = 400
+MAX_WRITES_PER_FILE = 3
 IGNORED_PARTS = {".git", "node_modules", ".venv", "__pycache__", "coverage", "dist", "htmlcov"}
 
 
@@ -33,6 +36,7 @@ class ToolContext:
     guard: BudgetGuard
     sandbox: SandboxRunner
     written: list[str] = field(default_factory=list)
+    write_counts: dict[str, int] = field(default_factory=dict)
     decisions: list[Decision] = field(default_factory=list)
     lockfile_changed: bool = False
     baseline: dict[Stack, Baseline] = field(default_factory=dict)
@@ -117,7 +121,15 @@ def write_test_file(ctx: ToolContext, arguments: dict[str, Any]) -> str:
     name = relative.as_posix()
 
     # Rewriting a file is how the agent fixes a failing test it just wrote, so
-    # an overwrite is allowed. Only the first write of a path costs budget.
+    # an overwrite is allowed. Only the first write of a path costs budget, and
+    # a per-file cap keeps a rewrite loop from spending the whole turn budget.
+    attempts = ctx.write_counts.get(name, 0)
+    if attempts >= MAX_WRITES_PER_FILE:
+        raise PathRejected(
+            f"{name} was already written {attempts} times; "
+            f"the per-file limit is {MAX_WRITES_PER_FILE}"
+        )
+    ctx.write_counts[name] = attempts + 1
     if name not in ctx.written:
         ctx.guard.record_file()
         ctx.written.append(name)
@@ -150,6 +162,33 @@ def run_pytest(ctx: ToolContext, arguments: dict[str, Any]) -> str:
 
 def run_vitest(ctx: ToolContext, arguments: dict[str, Any]) -> str:
     return _run(ctx, "frontend", arguments, coverage=False)
+
+
+def run_lint(ctx: ToolContext, arguments: dict[str, Any]) -> str:
+    """Run the same static checks the gate runs, before finishing."""
+    stack = arguments.get("stack")
+    if stack not in ("backend", "frontend"):
+        raise ValueError("stack must be backend or frontend")
+    paths = arguments.get("paths") or []
+    if not isinstance(paths, list) or not all(isinstance(item, str) for item in paths):
+        raise ValueError("paths must be a list of strings")
+    for item in paths:
+        if is_tooling_path(item):
+            raise PathRejected("tooling paths are out of scope")
+        ctx.policy.check_test_target(item)
+
+    if stack == "backend":
+        files = [item for item in (paths or ctx.written) if item.startswith("backend/")]
+        if not files:
+            raise ValueError("no backend test files to lint yet")
+        result = run_ruff(ctx.repo_root, files)
+        return wrap_untrusted(f"exit code: {result.returncode}\n{result.output}", "backend lint")
+
+    stack_relative = [
+        item[len(stack) + 1 :] if item.startswith(f"{stack}/") else item for item in paths
+    ]
+    outcome: CommandResult = ctx.sandbox.run(stack, stack_relative, typecheck=True)
+    return wrap_untrusted(f"exit code: {outcome.returncode}\n{outcome.output}", "frontend lint")
 
 
 def get_coverage(ctx: ToolContext, arguments: dict[str, Any]) -> str:
@@ -256,6 +295,22 @@ TOOL_SPECS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "run_lint",
+        "description": (
+            "Run the same static checks as the gate: ruff for the backend, "
+            "tsc and prettier for the frontend. Defaults to the files written "
+            "in this run."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "stack": {"type": "string", "enum": ["backend", "frontend"]},
+                "paths": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["stack"],
+        },
+    },
+    {
         "name": "get_coverage",
         "description": "Read the latest coverage summary produced in the sandbox.",
         "input_schema": {
@@ -289,6 +344,8 @@ def execute(ctx: ToolContext, name: str, arguments: dict[str, Any]) -> str:
             return run_pytest(ctx, arguments)
         if name == "run_vitest":
             return run_vitest(ctx, arguments)
+        if name == "run_lint":
+            return run_lint(ctx, arguments)
         if name == "get_coverage":
             return get_coverage(ctx, arguments)
         if name == "activate_skill":

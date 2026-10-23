@@ -74,7 +74,13 @@ Before finishing:
 
 ```
 run_vitest({"paths": ["frontend/src/features/todos/components/Foo.test.tsx"]})
+run_lint({"stack": "frontend"})
 ```
+
+The gate runs `tsc --noEmit` and `prettier --check` on the generated files with
+the repository config in `frontend/.prettierrc.json`: no semicolons, single
+quotes and trailing commas. Match the existing test files exactly; a formatting
+difference reverts the stack.
 
 `tsc --noEmit` and `prettier --check` run in the gate; keep tests type-clean and
 formatted.

@@ -39,7 +39,14 @@ class FakeSandbox:
         self.result = result or CommandResult(returncode=0, output="1 passed")
         self.calls: list[tuple[str, list[str], bool]] = []
 
-    def run(self, stack: Stack, paths: Sequence[str], *, coverage: bool = False) -> CommandResult:
+    def run(
+        self,
+        stack: Stack,
+        paths: Sequence[str],
+        *,
+        coverage: bool = False,
+        typecheck: bool = False,
+    ) -> CommandResult:
         self.calls.append((stack, list(paths), coverage))
         return self.result
 

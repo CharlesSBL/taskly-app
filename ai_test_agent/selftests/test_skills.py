@@ -101,7 +101,14 @@ def test_nested_directory_name_mismatch_is_rejected(tmp_path: Path) -> None:
 
 
 class _Sandbox:
-    def run(self, stack: Stack, paths: Sequence[str], *, coverage: bool = False) -> CommandResult:
+    def run(
+        self,
+        stack: Stack,
+        paths: Sequence[str],
+        *,
+        coverage: bool = False,
+        typecheck: bool = False,
+    ) -> CommandResult:
         return CommandResult(returncode=0, output="")
 
 

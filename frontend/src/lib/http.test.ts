@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { request } from './http'
 
-const fetchMock = vi.fn<(path: string, init?: RequestInit) => Promise<Response>>()
+const fetchMock =
+  vi.fn<(path: string, init?: RequestInit) => Promise<Response>>()
 
 function response(status: number, body?: unknown) {
   return {
@@ -75,12 +76,15 @@ it('reports a connection problem when the server is unreachable', async () => {
 it('rethrows the original error when the caller aborted the request', async () => {
   const controller = new AbortController()
   controller.abort()
-  const abortError = new DOMException('The operation was aborted.', 'AbortError')
+  const abortError = new DOMException(
+    'The operation was aborted.',
+    'AbortError',
+  )
   fetchMock.mockRejectedValue(abortError)
 
-  await expect(
-    request('/todos', { signal: controller.signal }),
-  ).rejects.toBe(abortError)
+  await expect(request('/todos', { signal: controller.signal })).rejects.toBe(
+    abortError,
+  )
 })
 
 it('uses the server detail message when the request is rejected', async () => {

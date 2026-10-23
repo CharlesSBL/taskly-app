@@ -63,6 +63,8 @@ Do not duplicate a test that already exists; extend it instead.
   `run_pytest({"paths": ["backend/tests"]})` or
   `run_vitest({"paths": ["frontend/src"]})`. A green file run is not a green
   suite; the gate runs the suite and rejects a stack whose suite fails.
+- Run `run_lint({"stack": "backend"})` or `run_lint({"stack": "frontend"})`.
+  The gate applies the same checks and reverts the stack when they fail.
 - A failure caused by the test is your bug: fix the test. A failure caused by
   pre-existing application code means the baseline is broken; report it instead
   of changing source.

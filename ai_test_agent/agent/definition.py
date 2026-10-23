@@ -18,6 +18,7 @@ REQUIRED_TOOLS = {
     "write_test_file",
     "run_pytest",
     "run_vitest",
+    "run_lint",
     "finish",
 }
 DEFAULT_MODEL_KEY = "default"

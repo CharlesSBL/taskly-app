@@ -7,14 +7,12 @@ failure is recorded with a reason and surfaced in the pull request comment.
 from __future__ import annotations
 
 import re
-import shutil
-import subprocess
-import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from agent.manifest import Manifest, Stack
+from lint_policy import run_ruff
 
 from .ast_quality import check_source
 from .coverage import read_coverage
@@ -26,43 +24,9 @@ STACKS: tuple[Stack, ...] = ("backend", "frontend")
 TESTS_PASSED = re.compile(r"(\d+) passed")
 
 
-def ruff_binary() -> str:
-    found = shutil.which("ruff")
-    if found:
-        return found
-    # The tooling venv's scripts directory is the reliable fallback when the
-    # verifier is started as `.venv/bin/python -m verifier`.
-    candidate = Path(sys.executable).with_name("ruff")
-    return str(candidate) if candidate.exists() else "ruff"
-
-
 def ruff_lint(pr_dir: Path, files: Sequence[str]) -> CommandResult:
-    try:
-        completed = subprocess.run(
-            [
-                ruff_binary(),
-                "check",
-                "--isolated",
-                "--select",
-                "E,F,B",
-                "--line-length",
-                "100",
-                *files,
-            ],
-            cwd=pr_dir,
-            capture_output=True,
-            text=True,
-            timeout=120,
-            check=False,
-        )
-    except FileNotFoundError:
-        return CommandResult(returncode=127, output="ruff is not installed")
-    except subprocess.TimeoutExpired:
-        return CommandResult(returncode=124, output="ruff timed out")
-    return CommandResult(
-        returncode=completed.returncode,
-        output=(completed.stdout + completed.stderr)[:2000],
-    )
+    result = run_ruff(pr_dir, files)
+    return CommandResult(returncode=result.returncode, output=result.output)
 
 
 def _tail(text: str, limit: int = 300) -> str:
@@ -138,9 +102,10 @@ def _run_stack(config: GateConfig, stack: Stack, paths: list[str]) -> StackGate:
             gate.reject(f"ruff: {_tail(result.output)}")
 
     if stack == "frontend" and not gate.reasons:
-        result = config.sandbox.run(stack, [], typecheck=True, repo=config.pr_dir)
+        lint_paths = [_stack_relative(stack, path) for path in stack_files]
+        result = config.sandbox.run(stack, lint_paths, typecheck=True, repo=config.pr_dir)
         if not result.succeeded:
-            gate.reject(f"tsc: {_tail(result.output)}")
+            gate.reject(f"tsc/prettier: {_tail(result.output)}")
 
     if not gate.reasons:
         run_paths = [_stack_relative(stack, path) for path in stack_files]
@@ -157,8 +122,12 @@ def _run_stack(config: GateConfig, stack: Stack, paths: list[str]) -> StackGate:
     if not gate.reasons:
         coverage_run = config.sandbox.run(stack, [], coverage=True, repo=config.pr_dir)
         gate.coverage_after = read_coverage(config.report_dir, stack)
-        if gate.coverage_after is None and not coverage_run.succeeded:
-            gate.reject(f"coverage run failed: {_tail(coverage_run.output)}")
+        # The coverage run executes the whole suite of the stack, so a red
+        # suite here means the patch broke tests the agent never ran.
+        if not coverage_run.succeeded:
+            gate.reject(f"full suite failed: {_tail(coverage_run.output)}")
+        elif gate.coverage_after is None:
+            gate.reject("no coverage report was produced")
 
     gate.accepted = not gate.reasons
     return gate

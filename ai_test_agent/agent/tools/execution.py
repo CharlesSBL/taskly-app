@@ -39,7 +39,12 @@ class SandboxRunner(Protocol):
     """Anything that can run a stack's tests in isolation."""
 
     def run(
-        self, stack: Stack, paths: Sequence[str], *, coverage: bool = False
+        self,
+        stack: Stack,
+        paths: Sequence[str],
+        *,
+        coverage: bool = False,
+        typecheck: bool = False,
     ) -> CommandResult: ...
 
 
@@ -52,7 +57,14 @@ class SubprocessSandbox:
     out_dir: Path
     timeout: float = DEFAULT_TIMEOUT_SECONDS
 
-    def run(self, stack: Stack, paths: Sequence[str], *, coverage: bool = False) -> CommandResult:
+    def run(
+        self,
+        stack: Stack,
+        paths: Sequence[str],
+        *,
+        coverage: bool = False,
+        typecheck: bool = False,
+    ) -> CommandResult:
         command = [
             str(self.script),
             "--stack",
@@ -62,7 +74,7 @@ class SubprocessSandbox:
             "--out",
             str(self.out_dir),
             "--mode",
-            "coverage" if coverage else "tests",
+            "typecheck" if typecheck else ("coverage" if coverage else "tests"),
         ]
         if paths:
             command.append("--")

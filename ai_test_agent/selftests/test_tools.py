@@ -12,15 +12,26 @@ from agent.manifest import Stack
 from agent.tools import ToolContext, execute
 from agent.tools.execution import CommandResult, SubprocessSandbox
 from agent.tools.untrusted import wrap_untrusted
+from lint_policy import LintResult
 
 
 class FakeSandbox:
     def __init__(self, result: CommandResult | None = None) -> None:
         self.result = result or CommandResult(returncode=0, output="1 passed")
         self.calls: list[tuple[Stack, list[str], bool]] = []
+        self.typecheck_calls: list[tuple[Stack, list[str]]] = []
 
-    def run(self, stack: Stack, paths: Sequence[str], *, coverage: bool = False) -> CommandResult:
+    def run(
+        self,
+        stack: Stack,
+        paths: Sequence[str],
+        *,
+        coverage: bool = False,
+        typecheck: bool = False,
+    ) -> CommandResult:
         self.calls.append((stack, list(paths), coverage))
+        if typecheck:
+            self.typecheck_calls.append((stack, list(paths)))
         return self.result
 
 
@@ -96,6 +107,17 @@ def test_write_can_rewrite_the_same_file_without_charging_the_budget(
     assert (context.repo_root / path).read_text() == fixed
     assert context.written == [path]
     assert context.guard.files_written == 1
+
+
+def test_write_is_capped_per_file(context: ToolContext) -> None:
+    """A rewrite loop must not be able to spend the whole budget on one file."""
+    path = "backend/tests/test_loop_guard.py"
+    args = {"path": path, "content": "def test_x(): pass\n"}
+    for _ in range(3):
+        assert execute(context, "write_test_file", args).startswith("wrote")
+    final = execute(context, "write_test_file", args)
+    assert "ERROR:" in final
+    assert "per-file limit is 3" in final
 
 
 def test_write_rejects_a_backend_line_longer_than_the_lint_limit(
@@ -282,6 +304,46 @@ def test_run_tools_accept_a_test_directory(context: ToolContext) -> None:
 
     missing = execute(context, "run_pytest", {"paths": ["backend/tests/missing"]})
     assert "ERROR:" in missing
+
+
+def test_run_lint_uses_the_gate_checks(context: ToolContext) -> None:
+    """`run_lint` must apply the same static checks as the verifier."""
+    sandbox = context.sandbox
+    assert isinstance(sandbox, FakeSandbox)
+
+    frontend = execute(
+        context,
+        "run_lint",
+        {"stack": "frontend", "paths": ["frontend/src/features/Foo.test.tsx"]},
+    )
+    assert sandbox.typecheck_calls == [("frontend", ["src/features/Foo.test.tsx"])]
+    assert "exit code: 0" in frontend
+    assert "ERROR:" in execute(context, "run_lint", {"stack": "mobile"})
+
+
+def test_run_lint_backend_uses_ruff_on_the_written_files(
+    context: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: dict[str, list[str]] = {}
+
+    def fake_ruff(_repo: Path, files: Sequence[str]) -> LintResult:
+        seen["files"] = list(files)
+        return LintResult(returncode=1, output="E501 Line too long")
+
+    monkeypatch.setattr("agent.tools.run_ruff", fake_ruff)
+    execute(
+        context,
+        "write_test_file",
+        {
+            "path": "backend/tests/test_lint.py",
+            "content": "def test_x():\n    assert True\n",
+        },
+    )
+
+    result = execute(context, "run_lint", {"stack": "backend"})
+    assert seen["files"] == ["backend/tests/test_lint.py"]
+    assert "exit code: 1" in result
+    assert "E501" in result
 
 
 def test_run_tools_reject_unsafe_paths(context: ToolContext) -> None:

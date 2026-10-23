@@ -204,6 +204,29 @@ def test_frontend_typecheck_failure_reverts(tmp_path: Path) -> None:
 
     assert report.status == "reverted"
     assert "tsc" in report.reverted_stacks["frontend"][0]
+    typecheck_calls = [call for call in sandbox.calls if call["typecheck"]]
+    assert typecheck_calls[0]["paths"] == ["src/features/Foo.test.tsx"]
+
+
+def test_failing_full_suite_reverts_the_stack(tmp_path: Path) -> None:
+    """The coverage run executes the whole suite, so a red suite must revert."""
+    make_pr(tmp_path, {BACKEND_PATH: BACKEND_SOURCE})
+    patch = block(BACKEND_PATH, BACKEND_SOURCE)
+    manifest = make_manifest([BACKEND_PATH])
+    (tmp_path / "out").mkdir()
+    sandbox = FakeSandbox(
+        tmp_path / "out",
+        handler=lambda **kw: (
+            CommandResult(1, "2 failed, 39 passed")
+            if kw["coverage"]
+            else CommandResult(0, "5 passed")
+        ),
+    )
+
+    report = verify(config(tmp_path, manifest, patch, sandbox))
+
+    assert report.status == "reverted"
+    assert "full suite failed" in report.reverted_stacks["backend"][0]
 
 
 def test_unfulfilled_create_is_rejected(tmp_path: Path) -> None:

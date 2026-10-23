@@ -254,7 +254,19 @@ failure reverts the stack.
 
 The full pipeline was exercised end to end on a scratch clone with a
 hand-written candidate test (not agent output): verifier accepted the backend
-stack, coverage moved 42.0% → 49.7%, the differential check reported
-`passed on both`, and the publisher rendered the comment from the real report.
-The agent-generated run is recorded in the real PR and in the example section
-above once the secret is configured.
+stack, the differential check reported `passed on both`, and the publisher
+rendered the comment from the real report. That scratch run is only a smoke
+test; every number in "Example run" comes from the workflow runs linked there.
+
+## Regression tests for the defects the live runs exposed
+
+| Defect | Test |
+| --- | --- |
+| Sandbox received `backend/...` although it runs with `cwd=backend` | `selftests/test_tools.py::test_run_tools_pass_stack_relative_paths_to_the_sandbox` |
+| The agent could not run a test directory, so it verified single files | `selftests/test_tools.py::test_run_tools_accept_a_test_directory` |
+| A wrong first draft could not be rewritten in the same run | `selftests/test_tools.py::test_write_can_rewrite_the_same_file_without_charging_the_budget` |
+| A backend line longer than the gate's 100-character limit | `selftests/test_tools.py::test_write_rejects_a_backend_line_longer_than_the_lint_limit` |
+| Publisher resolved a relative patch path after `git -C` | `selftests/test_commit.py::test_relative_patch_path_is_resolved_before_git` |
+| Truncated provider response was indistinguishable from a normal stop | `selftests/test_loop.py::test_truncated_response_is_reported_and_uses_the_configured_cap` |
+| A skipped job suppressed the verification gate | `selftests/test_workflows.py::test_verifier_always_runs_after_the_agent_job` |
+| Artifact download nested the patch under an extra directory | `selftests/test_workflows.py::test_artifact_downloads_are_not_nested_under_a_path` |

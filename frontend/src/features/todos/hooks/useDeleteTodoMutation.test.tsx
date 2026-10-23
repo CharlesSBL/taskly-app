@@ -51,9 +51,9 @@ it('keeps the cached list when the server rejects the deletion', async () => {
   })
 
   await act(async () => {
-    await expect(
-      result.current.mutateAsync(todoFixture.id),
-    ).rejects.toThrow('Task not found.')
+    await expect(result.current.mutateAsync(todoFixture.id)).rejects.toThrow(
+      'Task not found.',
+    )
   })
 
   expect(client.getQueryData<Todo[]>(todoKeys.list)).toEqual([

@@ -11,11 +11,13 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from lint_policy import MAX_LINE_LENGTH
+
 MAX_TEST_BYTES = 64 * 1024
 MAX_READ_BYTES = 24 * 1024
-# The verifier runs `ruff check --isolated --select E,F,B --line-length 100`
-# on backend tests, so a longer line is rejected before the agent wastes a run.
-MAX_BACKEND_LINE = 100
+# The verifier runs the same ruff invocation defined in `lint_policy.py`, so a
+# longer line is rejected before the agent wastes a run.
+MAX_BACKEND_LINE = MAX_LINE_LENGTH
 
 TOOLING_PREFIXES = ("ai_test_agent/", ".github/", ".claude/", "sandbox/")
 SECRET_FILE_PATTERNS = (

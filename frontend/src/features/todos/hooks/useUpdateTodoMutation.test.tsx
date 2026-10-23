@@ -71,9 +71,9 @@ it('keeps the cached list when the server rejects the update', async () => {
   })
 
   await act(async () => {
-    await expect(
-      result.current.mutateAsync(blankTitle),
-    ).rejects.toThrow('The title is invalid.')
+    await expect(result.current.mutateAsync(blankTitle)).rejects.toThrow(
+      'The title is invalid.',
+    )
   })
 
   expect(client.getQueryData<Todo[]>(todoKeys.list)).toEqual([
