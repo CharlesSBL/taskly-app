@@ -1,0 +1,496 @@
+name: Unit test agent
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+permissions: {}
+
+concurrency:
+  group: unit-test-agent-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  explain-skip:
+    name: Explain why the agent is skipped
+    if: >-
+      github.event.action != 'labeled' &&
+      (github.event.pull_request.head.repo.full_name != github.repository ||
+       github.event.pull_request.user.type == 'Bot' ||
+       github.event.sender.type == 'Bot')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Write summary
+        env:
+          IS_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+          IS_BOT: ${{ github.event.sender.type == 'Bot' }}
+        run: |
+          {
+            echo "## AI unit-test agent skipped"
+            echo ""
+            if [ "$IS_FORK" = "true" ]; then
+              echo "This pull request comes from a fork; secrets are not available to it."
+            fi
+            if [ "$IS_BOT" = "true" ]; then
+              echo "This push was made by a bot, so the agent does not run again."
+            fi
+            if [ "$IS_FORK" != "true" ] && [ "$IS_BOT" != "true" ]; then
+              echo "Dependabot pull requests are not analyzed by the agent."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  agent-run:
+    name: Agent (trusted tooling, untrusted PR)
+    needs: [explain-skip]
+    if: >-
+      always() && needs.explain-skip.result == 'skipped' &&
+      github.event.action != 'labeled' &&
+      github.event.sender.type != 'Bot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      stacks: ${{ steps.prefilter.outputs.stacks }}
+      head_sha: ${{ steps.meta.outputs.head_sha }}
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Check out the trusted base revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: trusted
+          persist-credentials: false
+
+      - name: Check out the pull request head (data only)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr
+          persist-credentials: false
+
+      - name: Record SHAs
+        id: meta
+        run: |
+          {
+            echo "head_sha=$HEAD_SHA"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: trusted/ai_test_agent/requirements.lock
+
+      - name: Install tooling (hashed lock, no API key)
+        working-directory: trusted/ai_test_agent
+        run: pip install --require-hashes -r requirements.lock
+
+      - name: Build the sandbox from the base revision's lock files
+        run: |
+          docker build \
+            -t taskly-sandbox:local \
+            -f trusted/ai_test_agent/sandbox/Dockerfile \
+            trusted
+
+      - name: Detect lockfile changes
+        id: lockfiles
+        run: |
+          changed=false
+          for file in \
+            backend/requirements.txt \
+            backend/requirements.in \
+            frontend/package.json \
+            frontend/package-lock.json; do
+            if ! cmp -s "trusted/$file" "pr/$file"; then
+              changed=true
+            fi
+          done
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+
+      - name: Collect PR metadata and diff (data only)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p work baseline artifacts
+          gh api "repos/$REPO/pulls/$PR_NUMBER/files" --paginate --jq '.[].filename' > work/changed.txt
+          gh pr diff "$PR_NUMBER" --repo "$REPO" > work/pr.diff
+
+      - name: Per-stack baseline in the sandbox (no API key)
+        id: baseline
+        run: |
+          set +e
+          trusted/ai_test_agent/sandbox/run.sh \
+            --stack backend --repo trusted --out baseline/backend --mode coverage \
+            > baseline/backend.log 2>&1
+          backend_exit=$?
+          trusted/ai_test_agent/sandbox/run.sh \
+            --stack frontend --repo trusted --out baseline/frontend --mode coverage \
+            > baseline/frontend.log 2>&1
+          frontend_exit=$?
+          BASELINE_BACKEND_EXIT=$backend_exit BASELINE_FRONTEND_EXIT=$frontend_exit \
+            python - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+
+          def report(stack: str, exit_code: int) -> dict[str, object]:
+              text = (Path("baseline") / f"{stack}.log").read_text(errors="replace")
+              text = re.sub(r"\x1b\[[0-9;]*m", "", text)
+              match = re.search(r"Tests\s+(\d+) passed", text) or re.search(r"(\d+) passed", text)
+              coverage = None
+              if stack == "backend":
+                  path = Path("baseline/backend/be_coverage.json")
+                  if path.is_file():
+                      coverage = json.loads(path.read_text())["totals"]["percent_covered"]
+              else:
+                  path = Path("baseline/frontend/fe_coverage/coverage-summary.json")
+                  if path.is_file():
+                      coverage = json.loads(path.read_text())["total"]["lines"]["pct"]
+              return {
+                  "status": "passed" if exit_code == 0 else "failed",
+                  "tests": int(match.group(1)) if match else None,
+                  "coverage": round(float(coverage), 2) if coverage is not None else None,
+              }
+
+
+          payload = {
+              "backend": report("backend", int(os.environ["BASELINE_BACKEND_EXIT"])),
+              "frontend": report("frontend", int(os.environ["BASELINE_FRONTEND_EXIT"])),
+          }
+          Path("baseline/baseline.json").write_text(json.dumps(payload, indent=2) + "\n")
+          PY
+          echo "present=true" >> "$GITHUB_OUTPUT"
+
+      - name: Pre-filter stacks with logic changes
+        id: prefilter
+        run: |
+          stacks=""
+          if [ "$(jq -r '.backend.status' baseline/baseline.json)" = "passed" ] \
+             && grep -Eq '^backend/app/.*\.py$' work/changed.txt; then
+            stacks="backend"
+          fi
+          if [ "$(jq -r '.frontend.status' baseline/baseline.json)" = "passed" ] \
+             && grep -E '^frontend/src/.*\.(ts|tsx)$' work/changed.txt \
+                | grep -Evq '(^frontend/src/design-system/|\.test\.(ts|tsx)$|\.stories\.tsx$|\.types\.ts$|/types\.ts$|/index\.ts$|/constants\.ts$)'; then
+            stacks="${stacks:+$stacks,}frontend"
+          fi
+          echo "stacks=$stacks" >> "$GITHUB_OUTPUT"
+          {
+            echo "## AI unit-test agent"
+            echo ""
+            if [ -z "$stacks" ]; then
+              echo "Nothing to test: no logic changes in a stack whose baseline is green."
+            else
+              echo "Stacks under analysis: $stacks"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run the agent (API key only in this step)
+        if: steps.prefilter.outputs.stacks != ''
+        working-directory: trusted/ai_test_agent
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          STACKS: ${{ steps.prefilter.outputs.stacks }}
+          LOCKFILE_CHANGED: ${{ steps.lockfiles.outputs.changed }}
+        run: |
+          args=(
+            --mode pr
+            --repo ../../pr
+            --diff ../../work/pr.diff
+            --out ../../artifacts
+            --skills-dir ../.claude/skills
+            --agent-definition ../.claude/agents/unit-test-agent.md
+            --sandbox-script sandbox/run.sh
+            --changed-files "$(tr '\n' ',' < ../../work/changed.txt)"
+            --baseline-json ../../baseline/baseline.json
+          )
+          if [ "$LOCKFILE_CHANGED" = "true" ]; then
+            args+=(--lockfile-changed)
+          fi
+          python -m agent "${args[@]}"
+
+      - name: Upload untrusted agent output
+        if: steps.prefilter.outputs.stacks != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: untrusted-agent-output-${{ github.event.pull_request.head.sha }}
+          path: |
+            artifacts/agent_manifest.json
+            artifacts/agent_trace.json
+            artifacts/candidate_tests.patch
+            baseline/baseline.json
+          if-no-files-found: error
+          retention-days: 7
+
+  verify-gate:
+    name: Verify (trusted tooling, no secrets)
+    needs: [agent-run]
+    if: needs.agent-run.result == 'success' && needs.agent-run.outputs.stacks != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      gate_status: ${{ steps.gate.outputs.gate_status }}
+      accepted_stacks: ${{ steps.gate.outputs.accepted_stacks }}
+      patch_sha256: ${{ steps.gate.outputs.patch_sha256 }}
+    env:
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - name: Check out the trusted base revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: trusted
+          persist-credentials: false
+
+      - name: Check out the pull request head (data only)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: trusted/ai_test_agent/requirements.lock
+
+      - name: Install tooling (hashed lock, no API key)
+        working-directory: trusted/ai_test_agent
+        run: pip install --require-hashes -r requirements.lock
+
+      - name: Build the sandbox from the base revision's lock files
+        run: |
+          docker build \
+            -t taskly-sandbox:local \
+            -f trusted/ai_test_agent/sandbox/Dockerfile \
+            trusted
+
+      - name: Download untrusted agent output
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: untrusted-agent-output-${{ github.event.pull_request.head.sha }}
+          path: artifacts
+
+      - name: Run the verification gate
+        id: verify
+        working-directory: trusted/ai_test_agent
+        run: |
+          python -m verifier \
+            --verify-only \
+            --pr-dir ../../pr \
+            --trusted-dir .. \
+            --base-sha "$BASE_SHA" \
+            --manifest ../../artifacts/agent_manifest.json \
+            --patch ../../artifacts/candidate_tests.patch \
+            --out ../../verified
+
+      - name: Render the PR report
+        working-directory: trusted/ai_test_agent
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python -m publisher comment \
+            --manifest ../../artifacts/agent_manifest.json \
+            --report ../../verified/verification_report.json \
+            --out ../../verified/pr_report.md \
+            --run-url "$RUN_URL"
+
+      - name: Expose gate outputs
+        id: gate
+        run: |
+          {
+            echo "gate_status=$(jq -r .status verified/verification_report.json)"
+            echo "accepted_stacks=$(jq -r '.accepted_stacks | join(",")' verified/verification_report.json)"
+            echo "patch_sha256=$(jq -r .patch_sha256 verified/verification_report.json)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload verified output
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verified-agent-output-${{ github.event.pull_request.head.sha }}
+          path: |
+            verified/verified_tests.patch
+            verified/verification_report.json
+            verified/pr_report.md
+            artifacts/agent_manifest.json
+            artifacts/agent_trace.json
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-results:
+    name: Publish results
+    needs: [agent-run, verify-gate]
+    if: >-
+      always() && github.event.action != 'labeled' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.sender.type != 'Bot'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Download verified output
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: verified-agent-output-${{ github.event.pull_request.head.sha }}
+          path: verified
+
+      - name: Build a fallback report
+        if: steps.download.outcome != 'success'
+        env:
+          STACKS: ${{ needs.agent-run.outputs.stacks }}
+          AGENT_RESULT: ${{ needs.agent-run.result }}
+        run: |
+          {
+            echo "<!-- ai-unit-test-agent-report -->"
+            echo "## 🤖 AI unit-test agent"
+            echo ""
+            if [ -z "$STACKS" ]; then
+              echo "⏭️ Nothing to test: no logic changes in a stack whose baseline is green."
+            else
+              echo "❌ The agent or the verification gate did not produce a verified artifact."
+              echo ""
+              echo "Check the workflow logs; no patch was accepted."
+            fi
+          } > verified/pr_report.md
+
+      - name: Post or update the sticky comment
+        run: |
+          comment_id=$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" --paginate \
+            --jq '.[] | select(.body | startswith("<!-- ai-unit-test-agent-report -->")) | .id' \
+            | head -n 1)
+          if [ -n "$comment_id" ]; then
+            gh api --method PATCH "repos/$REPO/issues/comments/$comment_id" \
+              -f body="$(cat verified/pr_report.md)"
+          else
+            gh api --method POST "repos/$REPO/issues/$PR_NUMBER/comments" \
+              -f body="$(cat verified/pr_report.md)"
+          fi
+
+      - name: Job summary
+        run: cat verified/pr_report.md >> "$GITHUB_STEP_SUMMARY"
+
+  commit-approved:
+    name: Commit verified tests (opt-in)
+    needs: [agent-run, verify-gate]
+    if: >-
+      always() &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      ((github.event.action == 'labeled' && github.event.label.name == 'ai-tests:commit') ||
+       (github.event.action != 'labeled' &&
+        contains(github.event.pull_request.labels.*.name, 'ai-tests:commit') &&
+        needs.verify-gate.result == 'success'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      SENDER: ${{ github.event.sender.login }}
+      REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out the trusted base revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: trusted
+          persist-credentials: false
+
+      - name: Check out the PR branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Install the trusted publisher (hashed lock)
+        run: pip install --require-hashes -r trusted/ai_test_agent/requirements.lock
+
+      - name: Authorize the labeler
+        id: authorize
+        continue-on-error: true
+        working-directory: trusted/ai_test_agent
+        run: python -m publisher authorize --repo "$REPO" --login "$SENDER"
+
+      - name: Comment when the labeler is not authorized
+        if: steps.authorize.outcome == 'failure'
+        run: |
+          gh api --method POST "repos/$REPO/issues/$PR_NUMBER/comments" \
+            -f body="Only maintainers with admin or write permission can use the \`ai-tests:commit\` label. Nothing was committed."
+          exit 1
+
+      - name: Find the verified artifact for this commit
+        id: artifact
+        if: steps.authorize.outcome == 'success'
+        run: |
+          run_id=$(gh api "repos/$REPO/actions/artifacts?name=verified-agent-output-$HEAD_SHA&per_page=100" \
+            --jq '[.artifacts[] | select(.expired | not)] | sort_by(.created_at) | last | .workflow_run.id // empty')
+          if [ -z "$run_id" ]; then
+            exit 1
+          fi
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Comment when no verified artifact exists
+        if: steps.authorize.outcome == 'success' && steps.artifact.outcome == 'failure'
+        run: |
+          gh api --method POST "repos/$REPO/issues/$PR_NUMBER/comments" \
+            -f body="No verified test artifact exists for this commit yet. Push a new commit or re-run the unit-test-agent workflow, then add the \`ai-tests:commit\` label again."
+
+      - name: Download the verified artifact
+        if: steps.authorize.outcome == 'success' && steps.artifact.outcome == 'success'
+        working-directory: pr
+        env:
+          RUN_ID: ${{ steps.artifact.outputs.run_id }}
+        run: gh run download "$RUN_ID" -n "verified-agent-output-$HEAD_SHA" -D ../verified
+
+      - name: Configure the git remote with the job token
+        if: steps.authorize.outcome == 'success' && steps.artifact.outcome == 'success'
+        run: |
+          git -C pr remote set-url origin \
+            "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+
+      - name: Apply, verify and push
+        if: steps.authorize.outcome == 'success' && steps.artifact.outcome == 'success'
+        working-directory: trusted/ai_test_agent
+        run: |
+          case "$HEAD_REF" in
+            *[!A-Za-z0-9._/-]*) echo "unsupported branch name" >&2; exit 1 ;;
+          esac
+          sha=$(jq -r .patch_sha256 ../../verified/verification_report.json)
+          python -m publisher commit \
+            --repo-dir ../../pr \
+            --patch ../../verified/verified_tests.patch \
+            --sha "$sha" \
+            --branch "$HEAD_REF" \
+            --message "test: add verified unit tests generated by the AI agent"
