@@ -45,7 +45,7 @@ jobs:
     name: Agent (trusted tooling, untrusted PR)
     needs: [explain-skip]
     if: >-
-      always() && needs.explain-skip.result == 'skipped' &&
+      always() && needs['explain-skip'].result == 'skipped' &&
       github.event.action != 'labeled' &&
       github.event.sender.type != 'Bot'
     runs-on: ubuntu-latest
@@ -257,7 +257,7 @@ jobs:
     # The agent job only survives when the pre-filter found stacks, and the
     # verifier handles an empty decision list as nothing_to_test. Relying on
     # the job output here skipped the gate after a successful agent run.
-    if: needs.agent-run.result == 'success'
+    if: needs['agent-run'].result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -379,8 +379,8 @@ jobs:
       - name: Build a fallback report
         if: steps.download.outcome != 'success'
         env:
-          STACKS: ${{ needs.agent-run.outputs.stacks }}
-          AGENT_RESULT: ${{ needs.agent-run.result }}
+          STACKS: ${{ needs['agent-run'].outputs.stacks }}
+          AGENT_RESULT: ${{ needs['agent-run'].result }}
         run: |
           mkdir -p verified
           {
@@ -421,7 +421,7 @@ jobs:
       ((github.event.action == 'labeled' && github.event.label.name == 'ai-tests:commit') ||
        (github.event.action != 'labeled' &&
         contains(github.event.pull_request.labels.*.name, 'ai-tests:commit') &&
-        needs.verify-gate.result == 'success'))
+        needs['verify-gate'].result == 'success'))
     runs-on: ubuntu-latest
     permissions:
       contents: write

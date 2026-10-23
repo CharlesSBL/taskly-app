@@ -177,7 +177,7 @@ jobs:
   verify-gate:
     name: Verify backfill (no secrets)
     needs: [agent-run]
-    if: needs.agent-run.result == 'success' && needs.agent-run.outputs.targets != ''
+    if: needs['agent-run'].result == 'success' && needs['agent-run'].outputs.targets != ''
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -270,7 +270,7 @@ jobs:
   publish-backfill:
     name: Open or update the backfill PR
     needs: [agent-run, verify-gate]
-    if: needs.verify-gate.result == 'success' && needs.verify-gate.outputs.accepted_stacks != ''
+    if: needs['verify-gate'].result == 'success' && needs['verify-gate'].outputs.accepted_stacks != ''
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
