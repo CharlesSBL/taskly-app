@@ -111,41 +111,52 @@ activation in the trace.
 
 ## Example run
 
-**Demo PR #1** — [pull/11](https://github.com/CharlesSBL/taskly-app/pull/11),
-workflow run
-[39927537759](https://github.com/CharlesSBL/taskly-app/actions/runs/39927537759).
-The PR adds a due-soon endpoint, a frontend predicate/badge and a docs note.
+Every row below is a real workflow run on the DeepSeek default; nothing is
+simulated. The report and a trimmed trace of the demo PR are committed under
+`docs/evidence/` because Actions artifacts expire.
 
-- 7 decisions: 2 `create` (`due.py`, `due.ts`), 4 `update` (router, API client,
-  header, page), 1 `skip` (docs).
-- Both stacks accepted. Coverage: backend 47.88% → 51.69% (+3.81), frontend
-  49.00% → 51.57% (+2.57).
-- Fail-on-base: the three updated test files failed on the base; the two new
-  files are `n/a`.
-- 20 turns, 12,459 input / 14,977 output tokens, **$0.0235** (DeepSeek flash,
-  peak rates).
-- The opt-in `ai-tests:commit` label produced commit
-  [`a3a6240`](https://github.com/CharlesSBL/taskly-app/commit/a3a6240) after the
-  labeler permission and patch sha256 were re-checked.
+| Run | Result | Cost |
+| --- | --- | --- |
+| [Backfill #10](https://github.com/CharlesSBL/taskly-app/actions/runs/39901769430) → [PR #10](https://github.com/CharlesSBL/taskly-app/pull/10), merged `dda5cd3` | Backend 42.42% → 47.88%, frontend 47.68% → 49.00%; 3 new test files, 18 turns | $0.0173 |
+| [Demo #11](https://github.com/CharlesSBL/taskly-app/actions/runs/39927537759) → [PR #11](https://github.com/CharlesSBL/taskly-app/pull/11) | 7 decisions (2 create, 4 update, 1 skip), both stacks accepted, backend 47.88% → 51.69% (+3.81), frontend 49.00% → 51.57% (+2.57), fail-on-base for the 3 updated files, 20 turns, 14,688 in / 17,743 out, opt-in commit [`a3a6240`](https://github.com/CharlesSBL/taskly-app/commit/a3a6240) | $0.0275 |
+| [Demo #12](https://github.com/CharlesSBL/taskly-app/actions/runs/39928204014) → [PR #12](https://github.com/CharlesSBL/taskly-app/pull/12) | Docs-only change: `nothing_to_test`, 0 turns, model `not-run` | $0.0000 |
+| [Backfill #13](https://github.com/CharlesSBL/taskly-app/actions/runs/39929977475) → [PR #13](https://github.com/CharlesSBL/taskly-app/pull/13), merged `805befb` | Frontend 49.00% → 61.58% (+12.58) accepted; backend reverted because the generated tests failed | $0.0518 |
+| [Backfill #14](https://github.com/CharlesSBL/taskly-app/actions/runs/39932704982) → [PR #14](https://github.com/CharlesSBL/taskly-app/pull/14), merged `75dce16` | Backend 47.88% → 98.79% (+50.91); six files, three created and three updated | $0.0354 |
+| [Backfill #15](https://github.com/CharlesSBL/taskly-app/actions/runs/39933376858) → [PR #15](https://github.com/CharlesSBL/taskly-app/pull/15), merged `8d0d4d5` | Frontend 61.58% → 81.45% (+19.87) | $0.0582 |
+| [Backfill #16](https://github.com/CharlesSBL/taskly-app/actions/runs/39934359334) → [PR #16](https://github.com/CharlesSBL/taskly-app/pull/16), closed unmerged | Backend 98.79% → 100.00%, frontend 81.45% → 96.68%, but three files were not Prettier-formatted and the gate of the time did not check: closed and re-verified after the fix | $0.0460 |
+| [Backfill #17](https://github.com/CharlesSBL/taskly-app/actions/runs/39938721832) → [PR #17](https://github.com/CharlesSBL/taskly-app/pull/17), merged `4b55d7d` | Backend 98.79% → 100.00% (+1.21), frontend 81.45% → 92.71% (+11.26), accepted by the gate that now runs Prettier | $0.0376 |
 
-**Coverage backfill** — run
-[39901769430](https://github.com/CharlesSBL/taskly-app/actions/runs/39901769430)
-opened [pull/10](https://github.com/CharlesSBL/taskly-app/pull/10), merged as
-`dda5cd3`. The agent wrote three tests (`test_health.py`, `AppProviders.test.tsx`,
-`TodoEmptyState.test.tsx`); coverage moved 42.42% → 47.88% backend and
-47.68% → 49.00% frontend. 18 turns, $0.0173.
+Coverage on `main` is now **100.00% backend and 92.71% frontend**, up from
+42.42% and 47.68%. The frontend took four accepted-or-rejected runs and about
+$0.19 to gain 45 points, roughly $0.004 per point; the backend reaches 100%
+because its uncovered surface was small and highly testable. What remains
+uncovered on the frontend is mostly error-handling branches that need a
+browser environment this sandbox does not provide.
 
-**Nothing to test** — [pull/12](https://github.com/CharlesSBL/taskly-app/pull/12),
-run
-[39928204014](https://github.com/CharlesSBL/taskly-app/actions/runs/39928204014):
-docs-only change, 0 turns, `$0.0000`, report state `nothing_to_test`.
+Across the thirteen live runs recorded here (including one rejected stack and
+two runs that produced no PR) the total spend is **$0.47**, summed from each
+manifest's `cost_usd` rather than estimated.
 
-The live runs also exposed four real defects that are fixed in `main`: test
-paths passed to the sandbox were not stack-relative, the publisher resolved a
-relative patch path after `git -C`, the verifier was suppressed by a skipped
-job dependency, and DeepSeek occasionally truncated a response at the 4k token
-cap. The fixes are the `fix(...)` and `ci:` commits around the backfill merge
-in the history.
+## What the live runs changed
+
+The runs were not only demos: each failure produced a tooling fix, a regression
+test and a line in the table below.
+
+| Defect the run exposed | Fix | Regression test |
+| --- | --- | --- |
+| The sandbox received `backend/...` although it runs with `cwd=backend`, so zero tests were collected | strip the stack prefix in `_run` (`80199c8`) | `test_tools.py::test_run_tools_pass_stack_relative_paths_to_the_sandbox` |
+| `run_pytest` rejected `backend/tests`, so the agent verified single files | accept a directory inside the test roots (`c67ca67`) | `test_tools.py::test_run_tools_accept_a_test_directory` |
+| A wrong first draft could not be rewritten in the same run | allow rewrites, charge the first write only (`eb50240`) | `test_tools.py::test_write_can_rewrite_the_same_file_without_charging_the_budget` |
+| A rewrite loop could spend the whole budget on one file | per-file write cap of 3 | `test_tools.py::test_write_is_capped_per_file` |
+| A backend line over the gate's 100 characters reverted a stack | reject at write time, single constant in `lint_policy.py` (`edb4676`) | `test_tools.py::test_write_rejects_a_backend_line_longer_than_the_lint_limit` |
+| The gate did not run Prettier, so unformatted files reached `main` | run `tsc` and `prettier --check` on the generated files (`30e7c21`) | `test_gate.py` frontend typecheck test, `run_lint` tool tests |
+| The full suite could fail without reverting the stack | require the coverage run to succeed (`30e7c21`) | `test_gate.py::test_failing_full_suite_reverts_the_stack` |
+| A closed backfill PR left a stale branch the next run reused | reset the bot branch from the default branch, push with a lease (`7fc1346`) | `test_commit.py::test_force_push_uses_a_lease_on_the_bot_branch` |
+| Publisher resolved a relative patch path after `git -C` | resolve before calling git (`9d255c3`) | `test_commit.py::test_relative_patch_path_is_resolved_before_git` |
+| A skipped job suppressed the verification gate | `if: always()` on the gate and no conditional dependency (`46a7b34`) | `test_workflows.py::test_verifier_always_runs_after_the_agent_job` |
+| Artifact download nested the patch under an extra directory | download at the workspace root (`4c90556`) | `test_workflows.py::test_artifact_downloads_are_not_nested_under_a_path` |
+| A truncated provider response looked like a normal stop | explicit note and a larger cap (`4441245`) | `test_loop.py::test_truncated_response_is_reported_and_uses_the_configured_cap` |
+| A transient provider error lost the whole run | three retries with backoff, trace always uploaded (`2459d89`) | `test_loop.py::test_transient_api_errors_are_retried` |
 
 ## Security checklist
 
@@ -257,16 +268,3 @@ hand-written candidate test (not agent output): verifier accepted the backend
 stack, the differential check reported `passed on both`, and the publisher
 rendered the comment from the real report. That scratch run is only a smoke
 test; every number in "Example run" comes from the workflow runs linked there.
-
-## Regression tests for the defects the live runs exposed
-
-| Defect | Test |
-| --- | --- |
-| Sandbox received `backend/...` although it runs with `cwd=backend` | `selftests/test_tools.py::test_run_tools_pass_stack_relative_paths_to_the_sandbox` |
-| The agent could not run a test directory, so it verified single files | `selftests/test_tools.py::test_run_tools_accept_a_test_directory` |
-| A wrong first draft could not be rewritten in the same run | `selftests/test_tools.py::test_write_can_rewrite_the_same_file_without_charging_the_budget` |
-| A backend line longer than the gate's 100-character limit | `selftests/test_tools.py::test_write_rejects_a_backend_line_longer_than_the_lint_limit` |
-| Publisher resolved a relative patch path after `git -C` | `selftests/test_commit.py::test_relative_patch_path_is_resolved_before_git` |
-| Truncated provider response was indistinguishable from a normal stop | `selftests/test_loop.py::test_truncated_response_is_reported_and_uses_the_configured_cap` |
-| A skipped job suppressed the verification gate | `selftests/test_workflows.py::test_verifier_always_runs_after_the_agent_job` |
-| Artifact download nested the patch under an extra directory | `selftests/test_workflows.py::test_artifact_downloads_are_not_nested_under_a_path` |

@@ -60,7 +60,9 @@ repos:
     hooks:
       - id: detect-secrets
         args: ["--baseline", ".secrets.baseline"]
-        exclude: ^frontend/package-lock\.json$
+        # The evidence copies are verbatim gate artifacts: their long hex
+        # strings are SHA-256 digests, not credentials.
+        exclude: ^(frontend/package-lock\.json|docs/evidence/.*\.json)$
 
   - repo: local
     hooks:
