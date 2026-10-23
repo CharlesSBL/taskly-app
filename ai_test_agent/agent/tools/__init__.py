@@ -15,6 +15,8 @@ from typing import Any
 
 from ..budget import BudgetExceeded, BudgetGuard
 from ..manifest import Baseline, Decision, Stack
+from ..skills import SkillError, SkillLibrary
+from ..tracing import Trace
 from .execution import CommandResult, SandboxRunner
 from .paths import MAX_READ_BYTES, PathPolicy, PathRejected, is_tooling_path
 from .untrusted import wrap_untrusted
@@ -35,6 +37,8 @@ class ToolContext:
     lockfile_changed: bool = False
     baseline: dict[Stack, Baseline] = field(default_factory=dict)
     max_diff_bytes: int = 40_000
+    skills: SkillLibrary | None = None
+    trace: Trace | None = None
 
     @property
     def policy(self) -> PathPolicy:
@@ -173,6 +177,16 @@ def get_coverage(ctx: ToolContext, arguments: dict[str, Any]) -> str:
     return wrap_untrusted(json.dumps(summary, sort_keys=True), f"{stack} coverage")
 
 
+def activate_skill(ctx: ToolContext, arguments: dict[str, Any]) -> str:
+    if ctx.skills is None:
+        raise ValueError("no skills are loaded")
+    name = _require_str(arguments, "name")
+    body = ctx.skills.activate(name)
+    if ctx.trace is not None:
+        ctx.trace.activate_skill(name)
+    return body
+
+
 TOOL_SPECS: list[dict[str, Any]] = [
     {
         "name": "get_diff",
@@ -246,6 +260,13 @@ TOOL_SPECS: list[dict[str, Any]] = [
 ]
 
 
+def build_tool_specs(library: SkillLibrary | None = None) -> list[dict[str, Any]]:
+    specs = list(TOOL_SPECS)
+    if library is not None and len(library) > 0:
+        specs.append(library.tool_spec())
+    return specs
+
+
 def execute(ctx: ToolContext, name: str, arguments: dict[str, Any]) -> str:
     """Dispatch a tool call. Invalid input returns an error string, not a crash."""
     try:
@@ -263,8 +284,10 @@ def execute(ctx: ToolContext, name: str, arguments: dict[str, Any]) -> str:
             return run_vitest(ctx, arguments)
         if name == "get_coverage":
             return get_coverage(ctx, arguments)
+        if name == "activate_skill":
+            return activate_skill(ctx, arguments)
         return f"ERROR: unknown tool {name!r}"
     except BudgetExceeded:
         raise
-    except (PathRejected, ValueError, OSError) as exc:
+    except (PathRejected, SkillError, ValueError, OSError) as exc:
         return f"ERROR: {exc}"
