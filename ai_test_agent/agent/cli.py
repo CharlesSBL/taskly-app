@@ -128,6 +128,10 @@ def main(argv: list[str] | None = None) -> int:
     result = run_agent(runtime, user_prompt)
     result.manifest.write(args.out / "agent_manifest.json")
     result.trace.write(args.out / "agent_trace.json")
+    if result.manifest.status != "completed":
+        # Redacted notes explain a failure without exposing credentials.
+        for note in result.trace.to_dict()["notes"]:
+            print(f"agent note: {note}", file=sys.stderr)
     build_candidate_patch(
         runtime.repo_root,
         result.manifest.files_written,

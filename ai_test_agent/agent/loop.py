@@ -6,6 +6,7 @@ message, tool call and token count is recorded in the trace.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -89,6 +90,17 @@ def _text_of(content: list[Any]) -> str:
     return "\n".join(parts)
 
 
+def _create_with_retries(client: AnthropicClient, *, attempts: int = 3, **kwargs: Any) -> Any:
+    """Retry transient provider failures before giving up on the turn."""
+    for attempt in range(attempts):
+        try:
+            return client.messages.create(**kwargs)
+        except Exception:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(2**attempt)
+
+
 def run_agent(runtime: AgentRuntime, user_prompt: str) -> AgentResult:
     settings = runtime.settings
     trace = Trace(model=settings.model)
@@ -121,7 +133,8 @@ def run_agent(runtime: AgentRuntime, user_prompt: str) -> AgentResult:
     try:
         for turn_index in range(1, settings.budgets.max_turns + 1):
             guard.start_turn()
-            response = runtime.client.messages.create(
+            response = _create_with_retries(
+                runtime.client,
                 model=settings.model,
                 max_tokens=settings.budgets.max_output_tokens,
                 system=system_prompt,

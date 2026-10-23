@@ -304,3 +304,37 @@ def test_parse_decisions_rejects_non_list_and_empty() -> None:
         parse_decisions({"decisions": "nope"})
     with pytest.raises(ValueError, match="must not be empty"):
         parse_decisions({"decisions": []})
+
+
+class FlakyMessages:
+    def __init__(self, failures: int) -> None:
+        self.failures = failures
+        self.calls = 0
+
+    def create(self, **kwargs: Any) -> Any:
+        self.calls += 1
+        if self.calls <= self.failures:
+            raise RuntimeError("temporary provider error")
+        return message(finish({"file": "README.md", "action": "skip", "rationale": "docs"}))
+
+
+class FlakyClient:
+    def __init__(self, failures: int) -> None:
+        self.messages = FlakyMessages(failures)
+
+
+def test_transient_api_errors_are_retried(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("agent.loop.time.sleep", lambda _seconds: None)
+    client = FlakyClient(failures=2)
+    result = run_agent(make_runtime(tmp_path, client), "prompt")  # type: ignore[arg-type]
+    assert result.manifest.status == "completed"
+    assert client.messages.calls == 3
+
+
+def test_retries_are_bounded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("agent.loop.time.sleep", lambda _seconds: None)
+    client = FlakyClient(failures=10)
+    result = run_agent(make_runtime(tmp_path, client), "prompt")  # type: ignore[arg-type]
+    assert result.manifest.status == "error"
+    assert client.messages.calls == 3
+    assert "temporary provider error" in result.trace.notes[0]
