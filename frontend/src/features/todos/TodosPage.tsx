@@ -12,6 +12,7 @@ import { useTodosBusy } from './hooks/useTodosBusy'
 import { useTodosQuery } from './hooks/useTodosQuery'
 import { useUpdateTodoMutation } from './hooks/useUpdateTodoMutation'
 import type { Todo } from './types'
+import { isDueSoon } from './utils/due'
 
 export function TodosPage() {
   const todosQuery = useTodosQuery()
@@ -23,6 +24,7 @@ export function TodosPage() {
   const [editor, setEditor] = useState<Todo | 'new' | null>(null)
   const [deleting, setDeleting] = useState<Todo | null>(null)
   const error = toggleTodo.error ?? todosQuery.error
+  const dueSoonCount = todos.filter((todo) => isDueSoon(todo)).length
 
   async function toggle(todo: Todo) {
     if (busy) return
@@ -50,6 +52,7 @@ export function TodosPage() {
       <main id="main" className="page-layout">
         <TodosHeader
           disabled={todosQuery.isPending || busy}
+          dueSoonCount={dueSoonCount}
           onCreate={() => setEditor('new')}
         />
         <TodoFilters
