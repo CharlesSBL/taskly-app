@@ -52,7 +52,7 @@ def _delta(value: object) -> str:
 
 def _coverage_table(report: VerificationReport) -> str:
     rows = [
-        "| Stack | Before | After | Δ | New tests | Flaky |",
+        "| Stack | Before | After | Δ | Tests run | Flaky |",
         "| --- | ---: | ---: | ---: | ---: | :---: |",
     ]
     for stack in sorted(report.coverage):

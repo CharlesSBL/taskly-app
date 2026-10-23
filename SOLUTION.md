@@ -103,7 +103,40 @@ activation in the trace.
 
 ## Example run
 
-<!-- TODO: replace with the real agent run after ANTHROPIC_API_KEY is set. -->
+**Demo PR #1** — [pull/11](https://github.com/CharlesSBL/taskly-app/pull/11),
+workflow run
+[39927537759](https://github.com/CharlesSBL/taskly-app/actions/runs/39927537759).
+The PR adds a due-soon endpoint, a frontend predicate/badge and a docs note.
+
+- 7 decisions: 2 `create` (`due.py`, `due.ts`), 4 `update` (router, API client,
+  header, page), 1 `skip` (docs).
+- Both stacks accepted. Coverage: backend 47.88% → 51.69% (+3.81), frontend
+  49.00% → 51.57% (+2.57).
+- Fail-on-base: the three updated test files failed on the base; the two new
+  files are `n/a`.
+- 20 turns, 12,459 input / 14,977 output tokens, **$0.0235** (DeepSeek flash,
+  peak rates).
+- The opt-in `ai-tests:commit` label produced commit
+  [`a3a6240`](https://github.com/CharlesSBL/taskly-app/commit/a3a6240) after the
+  labeler permission and patch sha256 were re-checked.
+
+**Coverage backfill** — run
+[39901769430](https://github.com/CharlesSBL/taskly-app/actions/runs/39901769430)
+opened [pull/10](https://github.com/CharlesSBL/taskly-app/pull/10), merged as
+`dda5cd3`. The agent wrote three tests (`test_health.py`, `AppProviders.test.tsx`,
+`TodoEmptyState.test.tsx`); coverage moved 42.42% → 47.88% backend and
+47.68% → 49.00% frontend. 18 turns, $0.0173.
+
+**Nothing to test** — [pull/12](https://github.com/CharlesSBL/taskly-app/pull/12),
+run
+[39928204014](https://github.com/CharlesSBL/taskly-app/actions/runs/39928204014):
+docs-only change, 0 turns, `$0.0000`, report state `nothing_to_test`.
+
+The live runs also exposed four real defects that are fixed in `main`: test
+paths passed to the sandbox were not stack-relative, the publisher resolved a
+relative patch path after `git -C`, the verifier was suppressed by a skipped
+job dependency, and DeepSeek occasionally truncated a response at the 4k token
+cap. The fixes are the commits immediately before the backfill merge.
 
 ## Security checklist
 
