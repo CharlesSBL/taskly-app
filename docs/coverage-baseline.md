@@ -86,3 +86,5 @@ them up:
 `backend/tests/mocks.py` (`create_autospec(TodoRepository)`) and
 `frontend/src/design-system/mocks.tsx` are the established mocking boundaries;
 new tests should follow them rather than introducing new patterns.
+
+_Backfill note: coverage is re-measured after each run._
