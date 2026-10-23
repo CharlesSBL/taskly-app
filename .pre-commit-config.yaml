@@ -65,11 +65,11 @@ repos:
   - repo: local
     hooks:
       - id: mypy-strict
-        name: mypy --strict (tooling packages)
-        entry: bash -c 'cd ai_test_agent && .venv/bin/mypy --strict agent verifier publisher'
+        name: mypy --strict (tooling)
+        entry: bash -c 'cd ai_test_agent && .venv/bin/mypy --strict .'
         language: system
         pass_filenames: false
-        files: ^ai_test_agent/(agent|verifier|publisher)/
+        files: ^ai_test_agent/(agent|verifier|publisher|selftests)/
 
       - id: bandit
         name: bandit (tooling packages)
