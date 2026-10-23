@@ -523,7 +523,7 @@ jobs:
         working-directory: pr
         env:
           RUN_ID: ${{ steps.artifact.outputs.run_id }}
-        run: gh run download "$RUN_ID" -n "verified-agent-output-$HEAD_SHA" -D ../verified
+        run: gh run download "$RUN_ID" -n "verified-agent-output-$HEAD_SHA" -D ..
 
       - name: Configure the git remote with the job token
         if: steps.authorize.outcome == 'success' && steps.artifact.outcome == 'success'
