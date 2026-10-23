@@ -210,6 +210,31 @@ jobs:
           cp baseline/backend/be_coverage.json artifacts/be_coverage.json
           cp baseline/frontend/fe_coverage/coverage-summary.json artifacts/fe_coverage/coverage-summary.json
 
+      - name: Record nothing-to-test artifacts
+        if: steps.prefilter.outputs.stacks == ''
+        run: |
+          mkdir -p artifacts
+          cat > artifacts/agent_manifest.json <<'JSON'
+          {
+            "schema_version": 1,
+            "status": "nothing_to_test",
+            "model": "not-run",
+            "decisions": [],
+            "files_written": [],
+            "skills_used": [],
+            "turns": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cost_usd": 0,
+            "lockfile_changed": false,
+            "baseline": {}
+          }
+          JSON
+          : > artifacts/candidate_tests.patch
+          cat > artifacts/agent_trace.json <<'JSON'
+          {"model": "not-run", "turns": [], "skills_activated": [], "notes": ["nothing_to_test"]}
+          JSON
+
       - name: Run the agent (API key only in this step)
         if: steps.prefilter.outputs.stacks != ''
         working-directory: trusted/ai_test_agent
@@ -240,7 +265,7 @@ jobs:
           python -m agent "${args[@]}"
 
       - name: Upload untrusted agent output
-        if: always() && steps.prefilter.outputs.stacks != ''
+        if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: untrusted-agent-output-${{ github.event.pull_request.head.sha }}
@@ -255,10 +280,9 @@ jobs:
   verify-gate:
     name: Verify (trusted tooling, no secrets)
     needs: [agent-run]
-    # The agent job only survives when the pre-filter found stacks, and the
-    # verifier handles an empty decision list as nothing_to_test. Relying on
-    # the job output here skipped the gate after a successful agent run.
-    if: needs['agent-run'].result == 'success'
+    # Always run after the agent job. A missing untrusted artifact fails the
+    # download below, and nothing_to_test is a valid manifest.
+    if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -382,13 +406,19 @@ jobs:
         env:
           STACKS: ${{ needs['agent-run'].outputs.stacks }}
           AGENT_RESULT: ${{ needs['agent-run'].result }}
+          IS_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+          IS_BOT: ${{ github.event.sender.type == 'Bot' }}
         run: |
           mkdir -p verified
           {
             echo "<!-- ai-unit-test-agent-report -->"
             echo "## 🤖 AI unit-test agent"
             echo ""
-            if [ -z "$STACKS" ]; then
+            if [ "$IS_FORK" = "true" ]; then
+              echo "⏭️ Skipped: this pull request comes from a fork; secrets are not available to it."
+            elif [ "$IS_BOT" = "true" ]; then
+              echo "⏭️ Skipped: the event was triggered by a bot."
+            elif [ -z "$STACKS" ]; then
               echo "⏭️ Nothing to test: no logic changes in a stack whose baseline is green."
             else
               echo "❌ The agent or the verification gate did not produce a verified artifact."
