@@ -145,9 +145,9 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          TASKLY_AGENT_PROVIDER: ${{ vars.AGENT_PROVIDER || 'anthropic' }}
+          TASKLY_AGENT_PROVIDER: ${{ vars.AGENT_PROVIDER || 'deepseek' }}
           TASKLY_AGENT_MODEL: ${{ vars.AGENT_MODEL }}
-          TASKLY_MAX_TURNS: "30"
+          TASKLY_MAX_TURNS: "45"
           TASKLY_MAX_OUTPUT_TOKENS: "16384"
           TARGETS: ${{ steps.targets.outputs.targets }}
         run: |
