@@ -82,6 +82,21 @@ def test_write_backend_test_is_allowed(context: ToolContext) -> None:
     assert context.guard.files_written == 1
 
 
+def test_write_rejects_a_backend_line_longer_than_the_lint_limit(
+    context: ToolContext,
+) -> None:
+    """Regression: the gate's ruff run failed on a line over 100 characters."""
+    content = f"def test_long():\n    assert {'x' * 120} == 'x'\n"
+    result = execute(
+        context,
+        "write_test_file",
+        {"path": "backend/tests/test_long.py", "content": content},
+    )
+    assert "ERROR:" in result
+    assert "longer than 100 characters" in result
+    assert not (context.repo_root / "backend/tests/test_long.py").exists()
+
+
 def test_write_empty_init_is_allowed(context: ToolContext) -> None:
     result = execute(
         context,

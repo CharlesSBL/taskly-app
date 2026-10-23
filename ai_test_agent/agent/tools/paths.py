@@ -13,6 +13,9 @@ from pathlib import Path
 
 MAX_TEST_BYTES = 64 * 1024
 MAX_READ_BYTES = 24 * 1024
+# The verifier runs `ruff check --isolated --select E,F,B --line-length 100`
+# on backend tests, so a longer line is rejected before the agent wastes a run.
+MAX_BACKEND_LINE = 100
 
 TOOLING_PREFIXES = ("ai_test_agent/", ".github/", ".claude/", "sandbox/")
 SECRET_FILE_PATTERNS = (
@@ -105,6 +108,17 @@ class PathPolicy:
         if BACKEND_TEST.fullmatch(name) or FRONTEND_TEST.fullmatch(name):
             if content.strip() == "":
                 raise PathRejected("test content must not be empty")
+            if BACKEND_TEST.fullmatch(name):
+                too_long = [
+                    number
+                    for number, line in enumerate(content.splitlines(), start=1)
+                    if len(line) > MAX_BACKEND_LINE
+                ]
+                if too_long:
+                    raise PathRejected(
+                        f"line {too_long[0]} is longer than {MAX_BACKEND_LINE} characters; "
+                        "the gate runs ruff with --line-length 100"
+                    )
             return relative
 
         raise PathRejected(

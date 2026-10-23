@@ -80,4 +80,11 @@ Run the new tests through the sandbox tool before finishing:
 
 ```
 run_pytest({"paths": ["backend/tests/features/todos/test_repository.py"]})
+run_pytest({"paths": ["backend/tests"]})   # the whole suite before finish
 ```
+
+The gate also runs `ruff check --isolated --select E,F,B --line-length 100` on
+the generated files. Keep lines at 100 characters or fewer (the writer
+rejects longer ones), avoid unused imports (`F401`) and unused local
+variables (`F841`), and do not use `assert` on tuples or bare `except`
+(`B011`, `B001`).
