@@ -23,3 +23,21 @@ it('invokes creation when enabled and blocks it when disabled', async () => {
   await user.click(button)
   expect(onCreate).toHaveBeenCalledTimes(1)
 })
+
+it('announces how many tasks are due soon', () => {
+  const { rerender } = render(
+    <TodosHeader disabled={false} dueSoonCount={2} onCreate={vi.fn()} />,
+  )
+  expect(screen.getByText('2 due soon')).toBeVisible()
+  rerender(<TodosHeader disabled={false} dueSoonCount={5} onCreate={vi.fn()} />)
+  expect(screen.getByText('5 due soon')).toBeVisible()
+})
+
+it('hides the due-soon badge when nothing is approaching', () => {
+  const { rerender } = render(
+    <TodosHeader disabled={false} dueSoonCount={0} onCreate={vi.fn()} />,
+  )
+  expect(screen.queryByText(/due soon/)).not.toBeInTheDocument()
+  rerender(<TodosHeader disabled={false} onCreate={vi.fn()} />)
+  expect(screen.queryByText(/due soon/)).not.toBeInTheDocument()
+})
