@@ -143,3 +143,17 @@ def test_tool_specs_include_the_skill_enum(tmp_path: Path) -> None:
     assert skill_spec["input_schema"]["properties"]["name"]["enum"] == ["analyze-diff"]
     assert build_tool_specs(None) == build_tool_specs()
     assert all(spec["name"] != "activate_skill" for spec in build_tool_specs(None))
+
+
+def test_repository_skills_are_discoverable_and_grounded() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    library = SkillLibrary.discover(repo_root / ".claude" / "skills")
+    assert library.names() == [
+        "analyze-diff",
+        "backend-pytest-conventions",
+        "frontend-vitest-conventions",
+        "test-quality-review",
+    ]
+    assert "backend/tests/conftest.py" in library.activate("backend-pytest-conventions")
+    assert "frontend/src/design-system/mocks.tsx" in library.activate("frontend-vitest-conventions")
+    assert "tooling path" in library.activate("analyze-diff")
