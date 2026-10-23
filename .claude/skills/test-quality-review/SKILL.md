@@ -59,6 +59,10 @@ Do not duplicate a test that already exists; extend it instead.
 ## Verification
 
 - Run the new tests with `run_pytest` / `run_vitest` before `finish`.
+- Then run the whole stack suite by passing the directory:
+  `run_pytest({"paths": ["backend/tests"]})` or
+  `run_vitest({"paths": ["frontend/src"]})`. A green file run is not a green
+  suite; the gate runs the suite and rejects a stack whose suite fails.
 - A failure caused by the test is your bug: fix the test. A failure caused by
   pre-existing application code means the baseline is broken; report it instead
   of changing source.

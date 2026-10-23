@@ -244,6 +244,21 @@ def test_run_tools_pass_stack_relative_paths_to_the_sandbox(context: ToolContext
     assert sandbox.calls[-1][1] == ["src/features/Foo.test.tsx"]
 
 
+def test_run_tools_accept_a_test_directory(context: ToolContext) -> None:
+    """Regression: the agent needs to run the whole suite, not only its files."""
+    sandbox = context.sandbox
+    assert isinstance(sandbox, FakeSandbox)
+
+    execute(context, "run_pytest", {"paths": ["backend/tests"]})
+    assert sandbox.calls[-1] == ("backend", ["tests"], False)
+
+    execute(context, "run_vitest", {"paths": ["frontend/src/features"]})
+    assert sandbox.calls[-1] == ("frontend", ["src/features"], False)
+
+    missing = execute(context, "run_pytest", {"paths": ["backend/tests/missing"]})
+    assert "ERROR:" in missing
+
+
 def test_run_tools_reject_unsafe_paths(context: ToolContext) -> None:
     result = execute(context, "run_pytest", {"paths": ["backend/app/feature.py"]})
     assert "ERROR:" in result

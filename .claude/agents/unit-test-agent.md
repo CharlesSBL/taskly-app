@@ -29,6 +29,9 @@ unit tests for a pull request: nothing else.
 - Run the tests you write with `run_pytest` / `run_vitest`. If a test fails
   because of your test, fix the test. If it fails because the application is
   broken, report that; do not change source.
+- Before `finish`, run the whole suite of a stack you touched by passing its
+  directory (`backend/tests`, `frontend/src`). Running only your own files
+  hides breakage elsewhere in the suite that the gate will reject.
 - Stay inside the budget. If the turn, file or cost limit is reached, stop and
   call `finish` with the decisions you have.
 

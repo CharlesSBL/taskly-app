@@ -23,9 +23,11 @@ SECRET_FILE_PATTERNS = (
 
 BACKEND_TEST = re.compile(r"^backend/tests/(?:[A-Za-z0-9_]+/)*test_[A-Za-z0-9_]+\.py$")
 BACKEND_INIT = re.compile(r"^backend/tests/(?:[A-Za-z0-9_]+/)*__init__\.py$")
+BACKEND_TEST_DIR = re.compile(r"^backend/tests(?:/[A-Za-z0-9_]+)*$")
 FRONTEND_TEST = re.compile(
     r"^frontend/src/(?:[A-Za-z0-9_.\-]+/)*[A-Za-z0-9_.\-]+\.test\.(?:ts|tsx)$"
 )
+FRONTEND_TEST_DIR = re.compile(r"^frontend/src(?:/[A-Za-z0-9_.\-]+)*$")
 
 FORBIDDEN_NAMES = {
     "conftest.py",
@@ -117,3 +119,21 @@ class PathPolicy:
         if BACKEND_TEST.fullmatch(name) or FRONTEND_TEST.fullmatch(name):
             return relative
         raise PathRejected(f"not a test file: {name}")
+
+    def check_test_target(self, raw: str) -> Path:
+        """Validate an execution argument: a test file or an existing directory.
+
+        Running the whole suite is the only way to see the real state of the
+        stack, and the agent asked for `backend/tests` on its first live
+        backfill, so directories inside the test roots are accepted too.
+        """
+        try:
+            return self.check_test_file(raw)
+        except PathRejected:
+            pass
+        relative = self._relative(raw)
+        name = relative.as_posix()
+        is_test_root = BACKEND_TEST_DIR.fullmatch(name) or FRONTEND_TEST_DIR.fullmatch(name)
+        if is_test_root and (self.repo_root / relative).is_dir():
+            return relative
+        raise PathRejected(f"not a test path: {name}")

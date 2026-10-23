@@ -10,6 +10,12 @@ through a sandboxed verification gate before a human can commit them.
 - Workflows: `.github/workflows/unit-test-agent.yml` (PR) and
   `coverage-backfill.yml` (manual backfill)
 
+**Provider note.** The default provider is DeepSeek
+(`deepseek-flash` over its Anthropic-compatible Messages API) because that is
+the path with recorded live runs. Anthropic (`claude-sonnet-5-5`) is fully
+supported and selected with `TASKLY_AGENT_PROVIDER=anthropic` plus
+`ANTHROPIC_API_KEY`, but no live run on it is recorded here.
+
 ## Architecture
 
 ```mermaid
@@ -46,7 +52,7 @@ flowchart LR
 | Decision | Rationale | Trade-off |
 | --- | --- | --- |
 | Custom tool-use loop on the official `anthropic` SDK | Every API call, tool call and token count is auditable; no framework hides the control flow | We own retries and message plumbing |
-| Provider abstraction: Anthropic and DeepSeek | DeepSeek exposes an Anthropic-compatible Messages API, so the same SDK, tools and loop work unchanged; the key, base URL, default model and price table are selected in one place | A second price table to maintain, and DeepSeek peak rates are used for budgets |
+| Provider abstraction: DeepSeek by default, Anthropic opt-in | DeepSeek exposes an Anthropic-compatible Messages API, so the same SDK, tools and loop work unchanged; the key, base URL, default model and price table are selected in one place. The default is the provider with recorded live runs | A second price table to maintain, and DeepSeek peak rates are used for budgets |
 | Direct SDK instead of LangGraph or similar | Fewer dependencies, clearer security boundary, nothing to keep in sync with the model API | No framework features (persistence, graph visualization) |
 | All tooling runs from the trusted base checkout | The PR cannot change the code that holds the key or makes decisions | Tooling changes need their own PR before a demo PR |
 | Patch posted by default, commit opt-in via label | The patch is reviewable and a human decides what lands | A second action is required to commit |
@@ -60,7 +66,9 @@ flowchart LR
 
 Prerequisites:
 
-1. Repository secret `ANTHROPIC_API_KEY`.
+1. Repository secret `DEEPSEEK_API_KEY` (default provider) or
+   `ANTHROPIC_API_KEY` with the repository variable
+   `AGENT_PROVIDER=anthropic`.
 2. Actions → General → Workflow permissions: read-only, and "Allow GitHub
    Actions to create and approve pull requests" enabled.
 3. Label `ai-tests:commit`.
@@ -79,7 +87,7 @@ Local run (same gate):
 cd ai_test_agent
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.lock
-export TASKLY_AGENT_PROVIDER=deepseek   # or anthropic, the default
+export TASKLY_AGENT_PROVIDER=deepseek   # the default; use anthropic to opt in
 export DEEPSEEK_API_KEY=...             # ANTHROPIC_API_KEY for Anthropic
 .venv/bin/python -m agent --mode pr \
   --repo ../pr --diff ../pr.diff --out ../artifacts \
@@ -166,8 +174,8 @@ in the history.
 - The base revision is a git checkout with the PR's base commit available.
 - The repository uses `main` by default.
 - Backend tests run with `cwd=backend`; frontend tests with `cwd=frontend`.
-- The provider is `anthropic` by default; this repository is configured with
-  `AGENT_PROVIDER=deepseek` and `AGENT_MODEL=deepseek-flash` for testing.
+- The provider is `deepseek` by default and Anthropic is opt-in, so the
+  provider with live-run evidence is the one a reviewer gets by default.
   Prices for both providers were verified on 2026-10-23; DeepSeek budgets use
   the higher peak-hour rates.
 - The app's lock file is not hash-pinned, so the sandbox uses binary wheels
@@ -175,21 +183,38 @@ in the history.
 
 ## Limitations
 
-- Prompt injection cannot be eliminated. Wrapping, path allowlists and the
-  gate reduce impact; they do not make the model trustworthy.
-- Fail-on-base is a heuristic: a test can pass on both revisions and still be
-  useful, and a test that fails on base may fail for an unrelated reason.
-- A PR can edit `.github/workflows/`. Branch protection/CODEOWNERS on tooling
-  paths is required before using the commit label on a sensitive repo.
+Four limitations matter most:
+
+1. **A push made with `GITHUB_TOKEN` does not trigger workflows.** The commit
+   job pushes with `GITHUB_TOKEN`, so `ci.yml` does not run on that commit and
+   required checks will not re-evaluate it. That is one reason the commit is
+   opt-in and the patch is the default; the verified patch and its sha256 are
+   already recorded in the sticky comment.
+2. **A pull request can edit the workflow files.** The agent and the gate are
+   read from the trusted base revision, but nothing stops a PR from changing
+   `.github/workflows/`. Protecting those paths with CODEOWNERS or branch
+   protection is a repository setting outside the workflow.
+3. **Prompt injection cannot be eliminated.** Wrapping untrusted content,
+   path allowlists, strict schemas and the independent gate reduce the impact;
+   they do not make the model trustworthy.
+4. **Fail-on-base is a heuristic.** A test can pass on both revisions and
+   still be useful, and a test that fails on base may fail for an unrelated
+   reason. It is evidence for a reviewer, not proof of regression sensitivity.
+
+The rest:
+
 - Forks are skipped; there is no fork execution path.
-- Pushes made with `GITHUB_TOKEN` do not trigger workflows, so required checks
-  will not re-run on the commit created by the label path. That is why commit
-  is opt-in and the patch is the default.
 - Model output is non-deterministic; the gate is the stable contract.
 - DeepSeek prices differ between peak and off-peak hours; costs are estimated
   at peak rates, so the reported figure is an upper bound outside peak hours.
 - Backfill selects at most `3 × max_batches` modules in one agent run with a
-  single $5 ceiling, rather than several independent runs.
+  single $5 ceiling, rather than several independent runs. With nine targets
+  the 30-turn budget ran out before `finish` and the run was rejected; the
+  turn budget was raised to 45 and batches were kept to six targets.
+- Backfill cannot create tests for code it cannot exercise: files that need a
+  database, a browser environment or a real network are skipped, and the agent
+  has no way to add dependencies. This is where per-stack coverage plateaus;
+  see "Example run" for the measured ceiling.
 - Diff coverage is not computed.
 - The TypeScript quality checks are lexical heuristics, not a full parser.
 - Coverage deltas depend on the full suite, so pre-existing flaky app tests can
